@@ -72,16 +72,18 @@ Template file placeholders:
 
 ## Manual command
 
-- `:AcmojSubmit`
-- `:AcmojProblemsets` load `/user/problemsets` and open selector (newest first).
-- `:AcmojProblemset {problemset_id}` load problemset description + problem list, then open the first unsolved problem file (fallback to first problem).
-- `:AcmojProblemNext` open next problem file (circular).
-- `:AcmojProblemPrev` open previous problem file (circular).
-- `:AcmojProblemJump {index_or_problem_id}` jump by list index or problem id.
-- `:AcmojProblemList` show/refocus the problemset view.
-- `:AcmojSetToken` prompt for token with hidden input, then write token to `token_file` and refresh user mapping/cache in background.
-- `:AcmojTemplate` create `template_file` with a default C++ template when missing, then open it for editing.
-- `:AcmojClearCache` clear local `cache_file` and in-memory cache.
+Use a single command hub with concise subcommands:
+
+- `:Acmoj push` submit current buffer.
+- `:Acmoj sets` load `/user/problemsets` and open selector (newest first).
+- `:Acmoj set {problemset_id}` load problemset description + problem list, then open the first unsolved problem file (fallback to first problem).
+- `:Acmoj next` open next problem file (circular).
+- `:Acmoj prev` open previous problem file (circular).
+- `:Acmoj open {index_or_problem_id}` open by list index or problem id.
+- `:Acmoj list` show/refocus the problemset view.
+- `:Acmoj token` prompt for token with hidden input, then write token to `token_file` and refresh user mapping/cache in background.
+- `:Acmoj tmpl` create `template_file` with a default C++ template when missing, then open it for editing.
+- `:Acmoj clear` clear local `cache_file` and in-memory cache.
 
 ## File naming and initialization
 
@@ -93,7 +95,7 @@ Template file placeholders:
 
 - Accepted problems are stored in `cache_file` and refreshed from `/submission/?status=accepted&username=<current_user>`.
 - `cache_file` also stores `token_to_username` (`sha256(token)` -> `username`) and `cache_username`.
-- On startup (or after `:AcmojSetToken`), if current token hash is not in `token_to_username`, plugin resolves `/user/profile` and refreshes accepted cache in background.
+- On startup (or after `:Acmoj token`), if current token hash is not in `token_to_username`, plugin resolves `/user/profile` and refreshes accepted cache in background.
 - Problemset selector shows `(accepted/total)` like `(2/3)`.
 - In problemset view, each problem line shows `✓` or `✗`.
 - Fully accepted problemsets and accepted problem lines are rendered dim/gray.
