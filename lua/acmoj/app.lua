@@ -35,6 +35,7 @@ local state = {
   problemset_buf = nil,
   selector_buf = nil,
   problem_line_to_index = {},
+  problem_back_line = nil,
   selector_line_to_id = {},
   cache = {
     accepted_problems = {},
@@ -143,6 +144,10 @@ local function ensure_view_buffer(kind)
     vim.keymap.set("n", "p", M.problem_prev, { buffer = buf, nowait = true, desc = "ACMOJ prev problem" })
     vim.keymap.set("n", "<CR>", function()
       local line = vim.api.nvim_win_get_cursor(0)[1]
+      if state.problem_back_line and line == state.problem_back_line then
+        M.problemsets()
+        return
+      end
       local index = state.problem_line_to_index[line]
       if index then
         M.problem_jump(index)
@@ -154,14 +159,39 @@ local function ensure_view_buffer(kind)
 end
 
 local function focus_buffer(buf)
+  local opts = nil
+  if type(buf) == "table" then
+    opts = buf
+    buf = opts.buf
+  end
+  opts = opts or {}
+
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if vim.api.nvim_win_get_buf(win) == buf then
       vim.api.nvim_set_current_win(win)
       return
     end
   end
+
+  if opts.reuse_current then
+    vim.api.nvim_win_set_buf(0, buf)
+    return
+  end
+
   vim.cmd("botright 18split")
   vim.api.nvim_win_set_buf(0, buf)
+end
+
+local function close_windows_with_buffer(buf, skip_win)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if win ~= skip_win and vim.api.nvim_win_get_buf(win) == buf then
+      pcall(vim.api.nvim_win_close, win, true)
+    end
+  end
 end
 
 local function focus_preferred_list_item(line_map, preferred)
@@ -199,6 +229,12 @@ local function focus_selector_preferred_item()
 end
 
 local function focus_problemset_preferred_item()
+  local accepted, total = accepted_count(state.problemset)
+  if accepted == total and state.problem_back_line then
+    vim.api.nvim_win_set_cursor(0, { state.problem_back_line, 0 })
+    return
+  end
+
   local problems = get_problems(state.problemset)
   focus_preferred_list_item(state.problem_line_to_index, function(index)
     local p = problems[index]
@@ -217,9 +253,14 @@ local function open_file_in_code_window(path)
     end
   end
 
-  if target then
-    vim.api.nvim_set_current_win(target)
+  if not target then
+    target = vim.api.nvim_get_current_win()
   end
+
+  close_windows_with_buffer(state.selector_buf, target)
+  close_windows_with_buffer(state.problemset_buf, target)
+
+  vim.api.nvim_set_current_win(target)
   vim.cmd("edit " .. vim.fn.fnameescape(path))
 end
 
@@ -284,6 +325,8 @@ local function render_problemset_view()
 
   table.insert(lines, "")
   table.insert(lines, "Problems:")
+  table.insert(lines, "返回题单列表")
+  local back_line = #lines
   for i, p in ipairs(problems) do
     local mark = cache.is_problem_accepted(p.id) and "✓" or "✗"
     local title = p.title or "(hidden)"
@@ -295,6 +338,7 @@ local function render_problemset_view()
   end
 
   state.problem_line_to_index = line_map
+  state.problem_back_line = back_line
   vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, -1, 0, -1)
@@ -447,12 +491,12 @@ local function load_problemset_by_id(problemset_id)
     end
 
     render_problemset_view()
-    focus_buffer(state.problemset_buf)
+    local reuse_current = state.selector_buf
+      and vim.api.nvim_buf_is_valid(state.selector_buf)
+      and vim.api.nvim_win_get_buf(0) == state.selector_buf
+    focus_buffer({ buf = state.problemset_buf, reuse_current = reuse_current })
+    close_windows_with_buffer(state.selector_buf)
     focus_problemset_preferred_item()
-
-    if #problems > 0 then
-      open_problem_by_index(state.current_index, true)
-    end
   end)
 end
 
@@ -475,7 +519,11 @@ local function load_problemsets_and_show()
 
     set_problemsets(body.problemsets)
     render_problemset_selector()
-    focus_buffer(state.selector_buf)
+    local reuse_current = state.problemset_buf
+      and vim.api.nvim_buf_is_valid(state.problemset_buf)
+      and vim.api.nvim_win_get_buf(0) == state.problemset_buf
+    focus_buffer({ buf = state.selector_buf, reuse_current = reuse_current })
+    close_windows_with_buffer(state.problemset_buf)
     focus_selector_preferred_item()
   end)
 end
