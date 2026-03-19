@@ -25,6 +25,7 @@ local state = {
   problemset = nil,
   current_index = nil,
   problemsets = {},
+  problemsets_by_id = {},
   problemset_buf = nil,
   selector_buf = nil,
   problem_line_to_index = {},
@@ -282,7 +283,6 @@ local function render_template_lines(problem, problemset)
   if not config.template_file or config.template_file == "" then
     return nil, "template_file is not configured"
   end
-
   local path = expand_path(config.template_file)
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok then
@@ -307,6 +307,46 @@ local function render_template_lines(problem, problemset)
     table.insert(out, v)
   end
   return out, nil
+end
+
+local function template_path()
+  if not config.template_file or config.template_file == "" then
+    return nil, "template_file is not configured"
+  end
+  return expand_path(config.template_file), nil
+end
+
+local function default_template_lines()
+  return {
+    "// ACMOJ {problem_id}",
+    "// {problem_title}",
+    "#include <bits/stdc++.h>",
+    "using namespace std;",
+    "",
+    "int main() {",
+    "  ios::sync_with_stdio(false);",
+    "  cin.tie(nullptr);",
+    "",
+    "  return 0;",
+    "}",
+  }
+end
+
+local function init_template_file()
+  local path, path_err = template_path()
+  if path_err then
+    return nil, false, path_err
+  end
+  if path_exists(path) then
+    return path, false, nil
+  end
+
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  local ok, write_err = pcall(vim.fn.writefile, default_template_lines(), path)
+  if not ok then
+    return nil, false, "write template failed: " .. tostring(write_err)
+  end
+  return path, true, nil
 end
 
 local function build_solution_path(problem)
@@ -432,14 +472,46 @@ local function focus_buffer(buf)
   vim.api.nvim_win_set_buf(0, buf)
 end
 
-local function focus_first_list_item(line_map)
-  local first_line = nil
+local function focus_preferred_list_item(line_map, preferred)
+  local lines = {}
   for line, _ in pairs(line_map or {}) do
-    if first_line == nil or line < first_line then
-      first_line = line
+    table.insert(lines, line)
+  end
+  table.sort(lines)
+
+  local target = nil
+  for _, line in ipairs(lines) do
+    local value = line_map[line]
+    if preferred and preferred(value, line) then
+      target = line
+      break
     end
   end
-  vim.api.nvim_win_set_cursor(0, { first_line or 1, 0 })
+
+  if not target then
+    target = lines[1] or 1
+  end
+
+  vim.api.nvim_win_set_cursor(0, { target, 0 })
+end
+
+local function focus_selector_preferred_item()
+  focus_preferred_list_item(state.selector_line_to_id, function(problemset_id)
+    local ps = state.problemsets_by_id[problemset_id]
+    if not ps then
+      return false
+    end
+    local accepted, total = accepted_count(ps)
+    return accepted < total
+  end)
+end
+
+local function focus_problemset_preferred_item()
+  local problems = get_problems(state.problemset)
+  focus_preferred_list_item(state.problem_line_to_index, function(index)
+    local p = problems[index]
+    return p and not is_problem_accepted(p.id)
+  end)
 end
 
 local function open_file_in_code_window(path)
@@ -522,9 +594,8 @@ local function render_problemset_view()
   table.insert(lines, "Problems:")
   for i, p in ipairs(problems) do
     local mark = is_problem_accepted(p.id) and "✓" or "✗"
-    local current = i == state.current_index and ">" or " "
     local title = p.title or "(hidden)"
-    table.insert(lines, string.format("%s [%d] %s %d %s", current, i, mark, p.id, title))
+    table.insert(lines, string.format("[%d] %s %d %s", i, mark, p.id, title))
     line_map[#lines] = i
     if mark == "✓" then
       table.insert(grey_lines, #lines)
@@ -607,7 +678,7 @@ local function poll_submission(submission_id, token, status_map)
   poll_once()
 end
 
-local function open_problem_by_index(index)
+local function open_problem_by_index(index, silent)
   local problems = get_problems(state.problemset)
   if #problems == 0 then
     notify("problemset has no problems", vim.log.levels.WARN)
@@ -631,10 +702,12 @@ local function open_problem_by_index(index)
   open_file_in_code_window(path)
   render_problemset_view()
 
-  if created then
-    notify(string.format("created %s", filename))
-  else
-    notify(string.format("opened %s", filename))
+  if not silent then
+    if created then
+      notify(string.format("created %s", filename))
+    else
+      notify(string.format("opened %s", filename))
+    end
   end
 end
 
@@ -692,12 +765,19 @@ local function warm_accepted_cache(token, username, on_done)
 end
 
 local function set_problemsets(problemsets)
+  local by_id = {}
   table.sort(problemsets, function(a, b)
     local x = tonumber(a.id) or 0
     local y = tonumber(b.id) or 0
     return x > y
   end)
+  for _, ps in ipairs(problemsets) do
+    if type(ps.id) == "number" then
+      by_id[ps.id] = ps
+    end
+  end
   state.problemsets = problemsets
+  state.problemsets_by_id = by_id
 end
 
 local function load_problemset_by_id(problemset_id)
@@ -719,15 +799,21 @@ local function load_problemset_by_id(problemset_id)
 
     state.problemset = body
     state.current_index = 1
+    local problems = get_problems(body)
+    for i, p in ipairs(problems) do
+      if not is_problem_accepted(p.id) then
+        state.current_index = i
+        break
+      end
+    end
+
     render_problemset_view()
     focus_buffer(state.problemset_buf)
-    focus_first_list_item(state.problem_line_to_index)
+    focus_problemset_preferred_item()
 
-    local count = #get_problems(body)
-    local accepted, total = accepted_count(body)
-    notify(string.format("loaded problemset #%d (%d/%d)", body.id, accepted, total))
+    local count = #problems
     if count > 0 then
-      open_problem_by_index(1)
+      open_problem_by_index(state.current_index, true)
     end
   end)
 end
@@ -752,24 +838,7 @@ local function load_problemsets_and_show()
     set_problemsets(body.problemsets)
     render_problemset_selector()
     focus_buffer(state.selector_buf)
-    focus_first_list_item(state.selector_line_to_id)
-    notify(string.format("loaded %d problemsets", #state.problemsets))
-
-    resolve_username(token, function(username, user_err)
-      if user_err then
-        notify("refresh accepted cache failed: " .. user_err, vim.log.levels.WARN)
-        return
-      end
-
-      warm_accepted_cache(token, username, function(cache_err)
-        if cache_err then
-          notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.WARN)
-          return
-        end
-        refresh_views()
-        notify("accepted cache refreshed")
-      end)
-    end)
+    focus_selector_preferred_item()
   end)
 end
 
@@ -813,6 +882,16 @@ function M.set_token(raw_token)
   refresh_cache_for_new_token(token)
 end
 
+local function prompt_and_set_token()
+  local token = vim.fn.inputsecret("ACMOJ token: ")
+  token = trim(token or "")
+  if token == "" then
+    notify("token input canceled", vim.log.levels.WARN)
+    return
+  end
+  M.set_token(token)
+end
+
 function M.clear_cache()
   state.cache = {
     accepted_problems = {},
@@ -827,6 +906,21 @@ function M.clear_cache()
 
   refresh_views()
   notify("cache cleared")
+end
+
+function M.template()
+  local path, created, err = init_template_file()
+  if err then
+    notify(err, vim.log.levels.ERROR)
+    return
+  end
+
+  open_file_in_code_window(path)
+  if created then
+    notify("template initialized and opened: " .. path)
+  else
+    notify("opened template: " .. path)
+  end
 end
 
 function M.submit_current_buffer()
@@ -933,7 +1027,7 @@ function M.problem_list()
   end
   render_problemset_view()
   focus_buffer(state.problemset_buf)
-  focus_first_list_item(state.problem_line_to_index)
+  focus_problemset_preferred_item()
 end
 
 function M.stop_poll(submission_id)
@@ -978,9 +1072,13 @@ function M.setup(opts)
       M.problem_list()
     end, { desc = "Show ACMOJ problemset details" })
 
-    vim.api.nvim_create_user_command("AcmojSetToken", function(cmd_opts)
-      M.set_token(cmd_opts.args)
-    end, { nargs = 1, desc = "Set ACMOJ token and refresh profile cache" })
+    vim.api.nvim_create_user_command("AcmojSetToken", function()
+      prompt_and_set_token()
+    end, { nargs = 0, desc = "Set ACMOJ token (secret prompt) and refresh profile cache" })
+
+    vim.api.nvim_create_user_command("AcmojTemplate", function()
+      M.template()
+    end, { nargs = 0, desc = "Initialize (if needed) and open ACMOJ template file" })
 
     vim.api.nvim_create_user_command("AcmojClearCache", function()
       M.clear_cache()

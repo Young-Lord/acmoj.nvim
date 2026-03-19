@@ -74,12 +74,13 @@ Template file placeholders:
 
 - `:AcmojSubmit`
 - `:AcmojProblemsets` load `/user/problemsets` and open selector (newest first).
-- `:AcmojProblemset {problemset_id}` load problemset description + problem list, then open first problem file.
+- `:AcmojProblemset {problemset_id}` load problemset description + problem list, then open the first unsolved problem file (fallback to first problem).
 - `:AcmojProblemNext` open next problem file (circular).
 - `:AcmojProblemPrev` open previous problem file (circular).
 - `:AcmojProblemJump {index_or_problem_id}` jump by list index or problem id.
 - `:AcmojProblemList` show/refocus the problemset view.
-- `:AcmojSetToken {token}` write token to `token_file` and refresh user mapping/cache in background.
+- `:AcmojSetToken` prompt for token with hidden input, then write token to `token_file` and refresh user mapping/cache in background.
+- `:AcmojTemplate` create `template_file` with a default C++ template when missing, then open it for editing.
 - `:AcmojClearCache` clear local `cache_file` and in-memory cache.
 
 ## File naming and initialization
@@ -96,3 +97,4 @@ Template file placeholders:
 - Problemset selector shows `(accepted/total)` like `(2/3)`.
 - In problemset view, each problem line shows `✓` or `✗`.
 - Fully accepted problemsets and accepted problem lines are rendered dim/gray.
+- Problemset selector cursor prefers the newest not-fully-solved entry; problem list cursor prefers the top unsolved entry. If none match, it falls back to the first entry (or line 1 when empty).
