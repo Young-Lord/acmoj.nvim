@@ -29,7 +29,11 @@ local state = {
   selector_buf = nil,
   problem_line_to_index = {},
   selector_line_to_id = {},
-  cache = { accepted_problems = {} },
+  cache = {
+    accepted_problems = {},
+    token_to_username = {},
+    cache_username = nil,
+  },
 }
 
 local active_poll = {}
@@ -176,6 +180,8 @@ local function save_cache()
   local payload = {
     updated_at = os.time(),
     accepted_problems = state.cache.accepted_problems,
+    token_to_username = state.cache.token_to_username,
+    cache_username = state.cache.cache_username,
   }
   local ok, encoded = pcall(vim.json.encode, payload)
   if not ok then
@@ -188,19 +194,65 @@ local function load_cache()
   local path = cache_path()
   local ok, lines = pcall(vim.fn.readfile, path)
   if not ok then
-    state.cache = { accepted_problems = {} }
+    state.cache = { accepted_problems = {}, token_to_username = {}, cache_username = nil }
     return
   end
 
   local raw = table.concat(lines, "\n")
   local success, decoded = pcall(vim.json.decode, raw)
   if not success or type(decoded) ~= "table" then
-    state.cache = { accepted_problems = {} }
+    state.cache = { accepted_problems = {}, token_to_username = {}, cache_username = nil }
     return
   end
 
   local accepted = type(decoded.accepted_problems) == "table" and decoded.accepted_problems or {}
-  state.cache = { accepted_problems = accepted }
+  local token_to_username = type(decoded.token_to_username) == "table" and decoded.token_to_username or {}
+  local cache_username = type(decoded.cache_username) == "string" and decoded.cache_username or nil
+  state.cache = {
+    accepted_problems = accepted,
+    token_to_username = token_to_username,
+    cache_username = cache_username,
+  }
+end
+
+local function hash_token(token)
+  local ok, hashed = pcall(vim.fn.sha256, token)
+  if ok and type(hashed) == "string" and hashed ~= "" then
+    return hashed
+  end
+  return tostring(token)
+end
+
+local function url_encode(value)
+  return (tostring(value):gsub("([^%w%-_%.~])", function(c)
+    return string.format("%%%02X", string.byte(c))
+  end))
+end
+
+local function resolve_username(token, on_done)
+  local token_key = hash_token(token)
+  local username = state.cache.token_to_username[token_key]
+  if type(username) == "string" and username ~= "" then
+    on_done(username, nil)
+    return
+  end
+
+  api_get(token, "/user/profile", function(body, err)
+    if err then
+      on_done(nil, "fetch /user/profile failed: " .. err)
+      return
+    end
+
+    if type(body) ~= "table" or type(body.username) ~= "string" or trim(body.username) == "" then
+      on_done(nil, "invalid /user/profile response")
+      return
+    end
+
+    local fetched = trim(body.username)
+    state.cache.token_to_username[token_key] = fetched
+    save_cache()
+    on_done(fetched, nil)
+  end)
 end
 
 local function mark_problem_accepted(problem_id)
@@ -288,6 +340,13 @@ local function human_status(status, status_map)
   return status
 end
 
+local function is_accepted_status(status)
+  if type(status) ~= "string" then
+    return false
+  end
+  return status:lower() == "accepted"
+end
+
 local function format_resource(sub)
   local parts = {}
   if sub.time_msecs ~= vim.NIL and sub.time_msecs ~= nil then
@@ -373,6 +432,16 @@ local function focus_buffer(buf)
   vim.api.nvim_win_set_buf(0, buf)
 end
 
+local function focus_first_list_item(line_map)
+  local first_line = nil
+  for line, _ in pairs(line_map or {}) do
+    if first_line == nil or line < first_line then
+      first_line = line
+    end
+  end
+  vim.api.nvim_win_set_cursor(0, { first_line or 1, 0 })
+end
+
 local function open_file_in_code_window(path)
   local target = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
@@ -440,6 +509,7 @@ local function render_problemset_view()
   table.insert(lines, "")
   table.insert(lines, "Description:")
   local desc = tostring(state.problemset.description or "")
+  desc = desc:gsub("\r\n", "\n")
   if desc == "" then
     table.insert(lines, "(empty)")
   else
@@ -506,7 +576,8 @@ local function poll_submission(submission_id, token, status_map)
       local finished = not sub.should_auto_reload
       if finished then
         local problem_id = sub.problem and sub.problem.id
-        if sub.status == "accepted" and type(problem_id) == "number" then
+        local accepted = is_accepted_status(sub.status)
+        if accepted and type(problem_id) == "number" then
           mark_problem_accepted(problem_id)
           refresh_views()
         end
@@ -517,7 +588,7 @@ local function poll_submission(submission_id, token, status_map)
           human_status(sub.status, status_map),
           format_resource(sub)
         )
-        local level = sub.status == "accepted" and vim.log.levels.INFO or vim.log.levels.WARN
+        local level = accepted and vim.log.levels.INFO or vim.log.levels.WARN
         notify(msg, level)
         active_poll[submission_id] = false
         return
@@ -567,10 +638,15 @@ local function open_problem_by_index(index)
   end
 end
 
-local function warm_accepted_cache(token, on_done)
+local function warm_accepted_cache(token, username, on_done)
   local page_limit = tonumber(config.accepted_cache_page_limit) or 50
   if page_limit < 1 then
     page_limit = 1
+  end
+
+  if state.cache.cache_username ~= username then
+    state.cache.accepted_problems = {}
+    state.cache.cache_username = username
   end
 
   local function fetch(cursor, pages)
@@ -580,7 +656,7 @@ local function warm_accepted_cache(token, on_done)
       return
     end
 
-    local endpoint = "/submission/?status=accepted"
+    local endpoint = "/submission/?status=accepted&username=" .. url_encode(username)
     if cursor then
       endpoint = endpoint .. "&cursor=" .. cursor
     end
@@ -594,7 +670,7 @@ local function warm_accepted_cache(token, on_done)
       if type(body.submissions) == "table" then
         for _, sub in ipairs(body.submissions) do
           local pid = sub and sub.problem and sub.problem.id
-          if type(pid) == "number" then
+          if type(pid) == "number" and is_accepted_status(sub.status) then
             state.cache.accepted_problems[tostring(pid)] = true
           end
         end
@@ -645,6 +721,7 @@ local function load_problemset_by_id(problemset_id)
     state.current_index = 1
     render_problemset_view()
     focus_buffer(state.problemset_buf)
+    focus_first_list_item(state.problem_line_to_index)
 
     local count = #get_problems(body)
     local accepted, total = accepted_count(body)
@@ -675,17 +752,81 @@ local function load_problemsets_and_show()
     set_problemsets(body.problemsets)
     render_problemset_selector()
     focus_buffer(state.selector_buf)
+    focus_first_list_item(state.selector_line_to_id)
     notify(string.format("loaded %d problemsets", #state.problemsets))
 
-    warm_accepted_cache(token, function(cache_err)
-      if cache_err then
-        notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.WARN)
+    resolve_username(token, function(username, user_err)
+      if user_err then
+        notify("refresh accepted cache failed: " .. user_err, vim.log.levels.WARN)
         return
       end
-      refresh_views()
-      notify("accepted cache refreshed")
+
+      warm_accepted_cache(token, username, function(cache_err)
+        if cache_err then
+          notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.WARN)
+          return
+        end
+        refresh_views()
+        notify("accepted cache refreshed")
+      end)
     end)
   end)
+end
+
+local function refresh_cache_for_new_token(token)
+  local token_key = hash_token(token)
+  local cached_username = state.cache.token_to_username[token_key]
+  if type(cached_username) == "string" and cached_username ~= "" then
+    return
+  end
+
+  resolve_username(token, function(username, user_err)
+    if user_err then
+      notify("refresh accepted cache failed: " .. user_err, vim.log.levels.ERROR)
+      return
+    end
+
+    warm_accepted_cache(token, username, function(cache_err)
+      if cache_err then
+        notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.ERROR)
+      end
+    end)
+  end)
+end
+
+function M.set_token(raw_token)
+  local token = trim(raw_token or "")
+  if token == "" then
+    notify("token cannot be empty", vim.log.levels.ERROR)
+    return
+  end
+
+  local path = expand_path(config.token_file)
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  local ok, write_err = pcall(vim.fn.writefile, { token }, path)
+  if not ok then
+    notify("write token failed: " .. tostring(write_err), vim.log.levels.ERROR)
+    return
+  end
+
+  notify("token saved")
+  refresh_cache_for_new_token(token)
+end
+
+function M.clear_cache()
+  state.cache = {
+    accepted_problems = {},
+    token_to_username = {},
+    cache_username = nil,
+  }
+
+  local path = cache_path()
+  if path_exists(path) then
+    pcall(vim.fn.delete, path)
+  end
+
+  refresh_views()
+  notify("cache cleared")
 end
 
 function M.submit_current_buffer()
@@ -792,6 +933,7 @@ function M.problem_list()
   end
   render_problemset_view()
   focus_buffer(state.problemset_buf)
+  focus_first_list_item(state.problem_line_to_index)
 end
 
 function M.stop_poll(submission_id)
@@ -801,6 +943,11 @@ end
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", config, opts or {})
   load_cache()
+
+  local token, token_err = read_token()
+  if not token_err then
+    refresh_cache_for_new_token(token)
+  end
 
   if not commands_created then
     vim.api.nvim_create_user_command("AcmojSubmit", function()
@@ -830,6 +977,14 @@ function M.setup(opts)
     vim.api.nvim_create_user_command("AcmojProblemList", function()
       M.problem_list()
     end, { desc = "Show ACMOJ problemset details" })
+
+    vim.api.nvim_create_user_command("AcmojSetToken", function(cmd_opts)
+      M.set_token(cmd_opts.args)
+    end, { nargs = 1, desc = "Set ACMOJ token and refresh profile cache" })
+
+    vim.api.nvim_create_user_command("AcmojClearCache", function()
+      M.clear_cache()
+    end, { desc = "Clear ACMOJ local cache" })
 
     commands_created = true
   end
