@@ -54,11 +54,16 @@ require("acmoj").setup({
   map_problem_next_lhs = "<leader>sn",
   map_problem_prev_lhs = "<leader>sp",
   map_problem_list_lhs = "<leader>sl",
+  map_run = false,
+  map_run_lhs = "<leader>r",
   solution_dir = "solutions",
   solution_ext = "cpp",
   template_file = "~/.config/nvim/acmoj/template.cpp",
   cache_file = "~/.local/state/nvim/acmoj/cache.json",
   accepted_cache_page_limit = 50,
+  compile_cmd = "g++ -std=c++17 -O2 -pipe {src} -o {bin}",
+  run_cmd = "{bin}",
+  show_problem_description = true,
 })
 ```
 
@@ -75,15 +80,60 @@ Template file placeholders:
 Use a single command hub with concise subcommands:
 
 - `:Acmoj push` submit current buffer.
+- `:Acmoj test` run all samples for current problem, compare with trimmed output (strip leading/trailing blank lines and per-line surrounding whitespace), and print `输入/理论输出/实际输出` for each mismatch.
+- `:Acmoj run` quick compile + run current file in an interactive terminal.
+- `:Acmoj` (without subcommand) is equivalent to `:Acmoj sets`.
+- `:Acmoj help` show command help.
 - `:Acmoj sets` load `/user/problemsets` and open selector (newest first).
 - `:Acmoj set {problemset_id}` load problemset description + problem list, then open the first unsolved problem file (fallback to first problem).
 - `:Acmoj next` open next problem file (circular).
 - `:Acmoj prev` open previous problem file (circular).
 - `:Acmoj open {index_or_problem_id}` open by list index or problem id.
 - `:Acmoj list` show/refocus the problemset view.
+- `:Acmoj desc` toggle split problem description panel.
 - `:Acmoj token` prompt for token with hidden input, then write token to `token_file` and refresh user mapping/cache in background.
 - `:Acmoj tmpl` create `template_file` with a default C++ template when missing, then open it for editing.
 - `:Acmoj clear` clear local `cache_file` and in-memory cache.
+
+Problem description panel notes:
+
+- Opens by default when entering a problem in a split window.
+- `:Acmoj desc` can toggle it on/off.
+- Content uses raw problem description text only (no sample display, no LaTeX rendering).
+- Newlines are normalized from `\r\n`/`\r` to `\n`.
+- Buffer is read-only and uses `nofile`.
+
+Notes:
+
+- Sample testing currently supports `language = "cpp"` and compiles with local `g++`.
+- If compilation fails, plugin reports compiler output directly.
+- `compile_cmd` and `run_cmd` are global templates used by both `:Acmoj test` and `:Acmoj run`.
+- Template placeholders: `{src}` for source path, `{bin}` for output binary path.
+
+## Bind quick run to `<leader>r`
+
+Option 1 (plugin-managed mapping):
+
+```lua
+require("acmoj").setup({
+  map_run = true,
+  map_run_lhs = "<leader>r",
+})
+```
+
+Option 2 (manual mapping):
+
+```lua
+vim.keymap.set("n", "<leader>r", "<cmd>Acmoj run<CR>", { desc = "ACMOJ run current file" })
+```
+
+` :Acmoj run` behavior:
+
+- Saves current buffer (`silent! w`) before running.
+- Builds command as `compile_cmd && run_cmd`.
+- If `Snacks.terminal.open` exists, it is used (interactive input supported).
+- Otherwise falls back to Neovim terminal split (`termopen`).
+- If compile/run command fails, terminal stays open and focus remains there for error inspection.
 
 ## File naming and initialization
 

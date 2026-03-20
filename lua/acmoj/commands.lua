@@ -1,9 +1,20 @@
 local M = {}
 
+local command_help_lines
+
 local subcommands = {
+  help = { run = function(_, _, notify)
+    notify(table.concat(command_help_lines(), "\n"), vim.log.levels.INFO)
+  end, desc = "show command help", min_args = 0, max_args = 0 },
   push = { run = function(actions)
     actions.submit()
   end, desc = "submit current buffer", min_args = 0, max_args = 0 },
+  test = { run = function(actions)
+    actions.test_samples()
+  end, desc = "run all problem samples", min_args = 0, max_args = 0 },
+  run = { run = function(actions)
+    actions.run_current()
+  end, desc = "compile and run current file", min_args = 0, max_args = 0 },
   sets = { run = function(actions)
     actions.problemsets()
   end, desc = "show problemsets selector", min_args = 0, max_args = 0 },
@@ -31,9 +42,12 @@ local subcommands = {
   clear = { run = function(actions)
     actions.clear_cache()
   end, desc = "clear local cache", min_args = 0, max_args = 0 },
+  desc = { run = function(actions)
+    actions.toggle_problem_description()
+  end, desc = "toggle problem description panel", min_args = 0, max_args = 0 },
 }
 
-local function command_help_lines()
+command_help_lines = function()
   local lines = { "usage: :Acmoj <subcmd> [args]", "subcommands:" }
   local names = vim.tbl_keys(subcommands)
   table.sort(names)
@@ -48,7 +62,7 @@ function M.create(actions, notify)
     local args = cmd_opts.fargs or {}
     local cmd = args[1]
     if not cmd or cmd == "" then
-      notify(table.concat(command_help_lines(), "\n"), vim.log.levels.INFO)
+      subcommands.sets.run(actions, {}, notify)
       return
     end
 
@@ -70,7 +84,7 @@ function M.create(actions, notify)
       return
     end
 
-    spec.run(actions, payload)
+    spec.run(actions, payload, notify)
   end, {
     nargs = "*",
     desc = "ACMOJ command hub",

@@ -20,11 +20,16 @@ local config = {
 	map_problem_prev_lhs = "<leader>sp",
 	map_problem_list_lhs = "<leader>sl",
 	map_problemsets_lhs = "<leader>ss",
+	map_run = false,
+	map_run_lhs = "<leader>r",
 	solution_dir = "solutions",
 	solution_ext = "cpp",
 	template_file = "~/.config/nvim/acmoj/template.cpp",
 	cache_file = "~/.local/state/nvim/acmoj/cache.json",
 	accepted_cache_page_limit = 50,
+	compile_cmd = "g++ -std=c++17 -O2 -pipe {src} -o {bin}",
+	run_cmd = "{bin}",
+	show_problem_description = true,
 }
 
 local state = {
@@ -37,6 +42,9 @@ local state = {
 	problem_line_to_index = {},
 	problem_back_line = nil,
 	selector_line_to_id = {},
+	problem_desc_buf = nil,
+	problem_desc_cache = {},
+	problem_desc_visible = true,
 	cache = {
 		accepted_problems = {},
 		token_to_username = {},
@@ -92,6 +100,169 @@ local function format_resource(sub)
 		return ""
 	end
 	return " | " .. table.concat(parts, " ")
+end
+
+local function shellescape(value)
+	return vim.fn.shellescape(tostring(value or ""))
+end
+
+local function build_command(template, vars)
+	local cmd = tostring(template or "")
+	if cmd == "" then
+		return nil, "command template is empty"
+	end
+
+	for key, value in pairs(vars or {}) do
+		cmd = cmd:gsub(vim.pesc("{" .. key .. "}"), shellescape(value))
+	end
+	return cmd, nil
+end
+
+local function run_shell_command(cmd, opts)
+	local obj = vim.system({ "sh", "-c", cmd }, opts or {})
+	return obj:wait(config.timeout_ms)
+end
+
+local function open_interactive_command(cmd, cwd)
+	local snacks = rawget(_G, "Snacks")
+	if snacks and snacks.terminal and type(snacks.terminal.open) == "function" then
+		snacks.terminal.open(cmd, {
+			cwd = cwd,
+			interactive = true,
+			auto_close = false,
+		})
+		return
+	end
+
+	vim.cmd("botright 15split")
+	vim.fn.termopen({ "sh", "-c", cmd }, { cwd = cwd })
+	vim.cmd("startinsert")
+end
+
+local function wrap_interactive_run_command(compile_cmd, run_cmd)
+	return string.format(
+		"( %s ) && ( %s ); __acmoj_status=$?; if [ $__acmoj_status -ne 0 ]; then echo; echo '[ACMOJ] compile/run failed (exit '$__acmoj_status')'; echo '[ACMOJ] shell kept open for inspection'; exec ${SHELL:-sh}; fi",
+		compile_cmd,
+		run_cmd
+	)
+end
+
+local function split_lines_keep_empty(text)
+	local value = tostring(text or "")
+	value = value:gsub("\r\n", "\n"):gsub("\r", "\n")
+	return vim.split(value, "\n", { plain = true, trimempty = false })
+end
+
+local function normalize_output(text)
+	local lines = split_lines_keep_empty(text)
+	for i, line in ipairs(lines) do
+		lines[i] = util.trim(line)
+	end
+
+	while #lines > 0 and lines[1] == "" do
+		table.remove(lines, 1)
+	end
+	while #lines > 0 and lines[#lines] == "" do
+		table.remove(lines, #lines)
+	end
+
+	return table.concat(lines, "\n")
+end
+
+local function render_text_or_empty(text)
+	local value = tostring(text or "")
+	if value == "" then
+		return "(empty)"
+	end
+	return value
+end
+
+local function extract_samples(problem)
+	if type(problem) ~= "table" then
+		return {}
+	end
+
+	local function push_sample(out, input, output)
+		if type(input) ~= "string" or type(output) ~= "string" then
+			return
+		end
+		table.insert(out, {
+			input = input,
+			expected = output,
+		})
+	end
+
+	local out = {}
+	local list_keys = { "samples", "sample", "sample_cases", "examples", "test_cases" }
+	for _, key in ipairs(list_keys) do
+		local list = problem[key]
+		if type(list) == "table" then
+			for _, item in ipairs(list) do
+				if type(item) == "table" then
+					push_sample(
+						out,
+						item.input or item.stdin or item.input_data or item[1],
+						item.output or item.stdout or item.output_data or item.answer or item[2]
+					)
+				end
+			end
+			if #out > 0 then
+				return out
+			end
+		end
+	end
+
+	push_sample(out, problem.sample_input, problem.sample_output)
+	return out
+end
+
+local function compile_cpp_code(code)
+	local temp_dir = vim.fn.tempname()
+	vim.fn.mkdir(temp_dir, "p")
+	local source = vim.fs.joinpath(temp_dir, "main.cpp")
+	local binary = vim.fs.joinpath(temp_dir, "main.out")
+
+	local lines = split_lines_keep_empty(code)
+	local ok, write_err = pcall(vim.fn.writefile, lines, source)
+	if not ok then
+		return nil, nil, "write temp source failed: " .. tostring(write_err)
+	end
+
+	local compile_cmd, cmd_err = build_command(config.compile_cmd, { src = source, bin = binary })
+	if cmd_err then
+		return nil, temp_dir, "invalid compile_cmd: " .. cmd_err
+	end
+
+	local result = run_shell_command(compile_cmd, { text = true })
+	if result.code ~= 0 then
+		local err = util.trim((result.stderr or "") .. "\n" .. (result.stdout or ""))
+		if err == "" then
+			err = string.format("compile command exited with code %d", result.code)
+		end
+		return nil, temp_dir, err
+	end
+
+	return binary, temp_dir, nil
+end
+
+local function run_binary_with_input(binary, input)
+	local run_cmd, cmd_err = build_command(config.run_cmd, { bin = binary })
+	if cmd_err then
+		return "", "invalid run_cmd: " .. cmd_err
+	end
+
+	local result = run_shell_command(run_cmd, {
+		stdin = tostring(input or ""),
+		text = true,
+	})
+	if result.code ~= 0 then
+		local err = util.trim(result.stderr or "")
+		if err == "" then
+			err = string.format("run command exited with code %d", result.code)
+		end
+		return result.stdout or "", err
+	end
+	return result.stdout or "", nil
 end
 
 local function get_problems(problemset)
@@ -194,6 +365,107 @@ local function close_windows_with_buffer(buf, skip_win)
 	end
 end
 
+local function ensure_problem_desc_buffer()
+	local buf = state.problem_desc_buf
+	if buf and vim.api.nvim_buf_is_valid(buf) then
+		return buf
+	end
+
+	buf = vim.api.nvim_create_buf(false, true)
+	state.problem_desc_buf = buf
+	vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+	vim.api.nvim_set_option_value("bufhidden", "hide", { buf = buf })
+	vim.api.nvim_set_option_value("swapfile", false, { buf = buf })
+	vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+	vim.api.nvim_set_option_value("readonly", true, { buf = buf })
+	vim.api.nvim_set_option_value("filetype", "text", { buf = buf })
+	return buf
+end
+
+local function focus_or_open_desc_window(buf)
+	for _, win in ipairs(vim.api.nvim_list_wins()) do
+		if vim.api.nvim_win_get_buf(win) == buf then
+			return win
+		end
+	end
+
+	vim.cmd("botright 14split")
+	vim.api.nvim_win_set_buf(0, buf)
+	return vim.api.nvim_get_current_win()
+end
+
+local function render_problem_description(problem, description)
+	local buf = ensure_problem_desc_buffer()
+	local desc = tostring(description or "")
+	desc = desc:gsub("\r\n", "\n"):gsub("\r", "\n")
+
+	local lines = {
+		string.format("ACMOJ %s %s", tostring(problem.id or ""), tostring(problem.title or "")),
+		"",
+	}
+	if desc == "" then
+		table.insert(lines, "(empty)")
+	else
+		for _, line in ipairs(vim.split(desc, "\n", { plain = true, trimempty = false })) do
+			table.insert(lines, line)
+		end
+	end
+
+	vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
+	vim.api.nvim_set_option_value("readonly", false, { buf = buf })
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+	vim.api.nvim_set_option_value("readonly", true, { buf = buf })
+	vim.api.nvim_buf_set_name(buf, string.format("acmoj://problem-desc/%s", tostring(problem.id or "current")))
+end
+
+local function show_problem_description(problem)
+	if not state.problem_desc_visible then
+		return
+	end
+	if type(problem) ~= "table" or type(problem.id) ~= "number" then
+		return
+	end
+
+	local previous_win = vim.api.nvim_get_current_win()
+	local buf = ensure_problem_desc_buffer()
+	focus_or_open_desc_window(buf)
+	vim.api.nvim_set_current_win(previous_win)
+
+	local cached = state.problem_desc_cache[problem.id]
+	if type(cached) == "string" then
+		render_problem_description(problem, cached)
+		return
+	end
+
+	render_problem_description(problem, "loading description ...")
+	local token, token_err = files.read_token()
+	if token_err then
+		render_problem_description(problem, "load description failed: " .. token_err)
+		return
+	end
+
+	api.get(token, "/problem/" .. problem.id, function(body, err)
+		if err then
+			render_problem_description(problem, "load description failed: " .. err)
+			return
+		end
+
+		local desc = ""
+		if type(body) == "table" and type(body.description) == "string" then
+			desc = body.description
+		end
+		state.problem_desc_cache[problem.id] = desc
+		render_problem_description(problem, desc)
+	end)
+end
+
+local function hide_problem_description()
+	if state.problem_desc_buf and vim.api.nvim_buf_is_valid(state.problem_desc_buf) then
+		close_windows_with_buffer(state.problem_desc_buf)
+	end
+end
+
 local function focus_preferred_list_item(line_map, preferred)
 	local lines = {}
 	for line, _ in pairs(line_map or {}) do
@@ -259,6 +531,7 @@ local function open_file_in_code_window(path)
 
 	close_windows_with_buffer(state.selector_buf, target)
 	close_windows_with_buffer(state.problemset_buf, target)
+	close_windows_with_buffer(state.problem_desc_buf, target)
 
 	vim.api.nvim_set_current_win(target)
 	vim.cmd("edit " .. vim.fn.fnameescape(path))
@@ -437,6 +710,7 @@ local function open_problem_by_index(index, silent)
 
 	open_file_in_code_window(path)
 	render_problemset_view()
+	show_problem_description(problem)
 end
 
 local function set_problemsets(problemsets)
@@ -553,6 +827,7 @@ end
 
 function M.clear_cache()
 	cache.clear_cache_file()
+	state.problem_desc_cache = {}
 	refresh_views()
 	notify("cache cleared")
 end
@@ -610,6 +885,112 @@ function M.submit_current_buffer()
 			poll_submission(submission_id, token, status_map)
 		end)
 	end)
+end
+
+function M.test_samples()
+	if config.language ~= "cpp" then
+		notify("sample testing currently supports only language=cpp", vim.log.levels.ERROR)
+		return
+	end
+
+	local token, token_err = files.read_token()
+	if token_err then
+		notify(token_err, vim.log.levels.ERROR)
+		return
+	end
+
+	local problem_id, id_err = files.get_problem_id_from_first_line()
+	if id_err then
+		notify(id_err, vim.log.levels.ERROR)
+		return
+	end
+
+	local code = files.current_buffer_code()
+	if code == "" then
+		notify("buffer is empty", vim.log.levels.ERROR)
+		return
+	end
+
+	notify(string.format("loading samples for problem %d ...", problem_id))
+	api.get(token, "/problem/" .. problem_id, function(problem, err)
+		if err then
+			notify("load problem failed: " .. err, vim.log.levels.ERROR)
+			return
+		end
+
+		local samples = extract_samples(problem)
+		if #samples == 0 then
+			notify("no available samples for this problem", vim.log.levels.WARN)
+			return
+		end
+
+		local binary, temp_dir, compile_err = compile_cpp_code(code)
+		if compile_err then
+			notify("编译失败:\n" .. compile_err, vim.log.levels.ERROR)
+			if temp_dir then
+				pcall(vim.fn.delete, temp_dir, "rf")
+			end
+			return
+		end
+
+		local mismatch = 0
+		for i, sample in ipairs(samples) do
+			local actual, run_err = run_binary_with_input(binary, sample.input)
+			if run_err then
+				actual = (actual or "") .. "\n[runtime error] " .. run_err
+			end
+
+			local expected_norm = normalize_output(sample.expected)
+			local actual_norm = normalize_output(actual)
+			if expected_norm ~= actual_norm then
+				mismatch = mismatch + 1
+				notify(
+					table.concat({
+						string.format("测试点 #%d 结果不一致", i),
+						"输入:",
+						render_text_or_empty(sample.input),
+						"理论输出:",
+						render_text_or_empty(sample.expected),
+						"实际输出:",
+						render_text_or_empty(actual),
+					}, "\n"),
+					vim.log.levels.WARN
+				)
+			end
+		end
+
+		pcall(vim.fn.delete, temp_dir, "rf")
+		if mismatch == 0 then
+			notify(string.format("sample tests passed (%d/%d)", #samples, #samples), vim.log.levels.INFO)
+		else
+			notify(string.format("sample tests finished: %d passed, %d failed", #samples - mismatch, mismatch), vim.log.levels.WARN)
+		end
+	end)
+end
+
+function M.run_current()
+	vim.cmd("silent! w")
+
+	local src = vim.fn.expand("%:p")
+	if src == "" then
+		notify("no current file to run", vim.log.levels.ERROR)
+		return
+	end
+
+	local cwd = vim.fn.expand("%:p:h")
+	local bin = vim.fn.expand("%:p:r")
+	local compile_cmd, compile_err = build_command(config.compile_cmd, { src = src, bin = bin })
+	if compile_err then
+		notify("invalid compile_cmd: " .. compile_err, vim.log.levels.ERROR)
+		return
+	end
+	local run_cmd, run_err = build_command(config.run_cmd, { src = src, bin = bin })
+	if run_err then
+		notify("invalid run_cmd: " .. run_err, vim.log.levels.ERROR)
+		return
+	end
+
+	open_interactive_command(wrap_interactive_run_command(compile_cmd, run_cmd), cwd)
 end
 
 function M.problemset(id)
@@ -679,12 +1060,32 @@ function M.problem_list()
 	focus_problemset_preferred_item()
 end
 
+function M.toggle_problem_description()
+	state.problem_desc_visible = not state.problem_desc_visible
+	if not state.problem_desc_visible then
+		hide_problem_description()
+		notify("problem description panel: off")
+		return
+	end
+
+	notify("problem description panel: on")
+	if not state.problemset or not state.current_index then
+		return
+	end
+	local problems = get_problems(state.problemset)
+	show_problem_description(problems[state.current_index])
+end
+
 function M.stop_poll(submission_id)
 	active_poll[submission_id] = false
 end
 
 function M.setup(opts)
 	config = vim.tbl_deep_extend("force", config, opts or {})
+	state.problem_desc_visible = config.show_problem_description ~= false
+	if not state.problem_desc_visible then
+		hide_problem_description()
+	end
 	api = api_module.create(config, util)
 	cache = cache_module.create(config, state, util, api)
 	files = files_module.create(config, state, util)
@@ -700,6 +1101,8 @@ function M.setup(opts)
 	if not commands_created then
 		commands.create({
 			submit = M.submit_current_buffer,
+			test_samples = M.test_samples,
+			run_current = M.run_current,
 			problemsets = M.problemsets,
 			problemset = M.problemset,
 			problem_next = M.problem_next,
@@ -709,6 +1112,7 @@ function M.setup(opts)
 			prompt_set_token = prompt_and_set_token,
 			template = M.template,
 			clear_cache = M.clear_cache,
+			toggle_problem_description = M.toggle_problem_description,
 		}, notify)
 		commands_created = true
 	end
@@ -722,6 +1126,10 @@ function M.setup(opts)
 		vim.keymap.set("n", config.map_problem_next_lhs, M.problem_next, { desc = "ACMOJ next problem" })
 		vim.keymap.set("n", config.map_problem_prev_lhs, M.problem_prev, { desc = "ACMOJ previous problem" })
 		vim.keymap.set("n", config.map_problem_list_lhs, M.problem_list, { desc = "ACMOJ problemset list" })
+	end
+
+	if config.map_run then
+		vim.keymap.set("n", config.map_run_lhs, M.run_current, { desc = "ACMOJ compile and run current file" })
 	end
 end
 
