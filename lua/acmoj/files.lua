@@ -37,7 +37,7 @@ function M.create(config, state, util)
 
   local function get_problem_id_from_first_line()
     local line = vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] or ""
-    local id = line:match("ACMOJ.*(%d+)")
+    local id = line:match("ACMOJ[^%d]*(%d+)")
     if not id then
       return nil, "first line must match ACMOJ(.+)?(\\d+) and contain problem id"
     end

@@ -62,6 +62,7 @@ function M.create(config, util)
         on_done(nil, err)
         return
       end
+
       if type(body) ~= "table" or type(body.id) ~= "number" then
         on_done(nil, "submit failed: response does not include submission id")
         return

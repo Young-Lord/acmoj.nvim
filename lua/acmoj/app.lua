@@ -182,37 +182,21 @@ local function extract_samples(problem)
 		return {}
 	end
 
-	local function push_sample(out, input, output)
-		if type(input) ~= "string" or type(output) ~= "string" then
-			return
-		end
-		table.insert(out, {
-			input = input,
-			expected = output,
-		})
-	end
-
 	local out = {}
-	local list_keys = { "samples", "sample", "sample_cases", "examples", "test_cases" }
-	for _, key in ipairs(list_keys) do
-		local list = problem[key]
-		if type(list) == "table" then
-			for _, item in ipairs(list) do
-				if type(item) == "table" then
-					push_sample(
-						out,
-						item.input or item.stdin or item.input_data or item[1],
-						item.output or item.stdout or item.output_data or item.answer or item[2]
-					)
-				end
-			end
-			if #out > 0 then
-				return out
-			end
+	local examples = problem.examples
+	if type(examples) ~= "table" then
+		return out
+	end
+
+	for _, item in ipairs(examples) do
+		if type(item) == "table" and type(item.input) == "string" and type(item.output) == "string" then
+			table.insert(out, {
+				input = item.input,
+				expected = item.output,
+			})
 		end
 	end
 
-	push_sample(out, problem.sample_input, problem.sample_output)
 	return out
 end
 
