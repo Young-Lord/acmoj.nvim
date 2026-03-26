@@ -60,8 +60,13 @@ local api = api_module.create(config, util)
 local cache = cache_module.create(config, state, util, api)
 local files = files_module.create(config, state, util)
 
-local function notify(msg, level)
-	vim.notify(config.notify_prefix .. msg, level or vim.log.levels.INFO)
+local function notify(msg, level, opts)
+	vim.notify(config.notify_prefix .. msg, level or vim.log.levels.INFO, opts)
+end
+
+local function notify_sticky(msg, level, opts)
+	local merged_opts = vim.tbl_extend("force", { timeout = false }, opts or {})
+	notify(msg, level, merged_opts)
 end
 
 local function ensure_highlights()
@@ -369,13 +374,18 @@ end
 local function focus_or_open_desc_window(buf)
 	for _, win in ipairs(vim.api.nvim_list_wins()) do
 		if vim.api.nvim_win_get_buf(win) == buf then
+			vim.api.nvim_set_option_value("wrap", true, { win = win })
+			vim.api.nvim_set_option_value("linebreak", true, { win = win })
 			return win
 		end
 	end
 
 	vim.cmd("botright 14split")
 	vim.api.nvim_win_set_buf(0, buf)
-	return vim.api.nvim_get_current_win()
+	local win = vim.api.nvim_get_current_win()
+	vim.api.nvim_set_option_value("wrap", true, { win = win })
+	vim.api.nvim_set_option_value("linebreak", true, { win = win })
+	return win
 end
 
 local function render_problem_description(problem, description)
@@ -912,7 +922,7 @@ function M.test_samples()
 
 		local binary, temp_dir, compile_err = compile_cpp_code(code)
 		if compile_err then
-			notify("编译失败:\n" .. compile_err, vim.log.levels.ERROR)
+			notify_sticky("编译失败:\n" .. compile_err, vim.log.levels.ERROR)
 			if temp_dir then
 				pcall(vim.fn.delete, temp_dir, "rf")
 			end
@@ -930,7 +940,7 @@ function M.test_samples()
 			local actual_norm = normalize_output(actual)
 			if expected_norm ~= actual_norm then
 				mismatch = mismatch + 1
-				notify(
+				notify_sticky(
 					table.concat({
 						string.format("测试点 #%d 结果不一致", i),
 						"输入:",
@@ -949,7 +959,7 @@ function M.test_samples()
 		if mismatch == 0 then
 			notify(string.format("sample tests passed (%d/%d)", #samples, #samples), vim.log.levels.INFO)
 		else
-			notify(string.format("sample tests finished: %d passed, %d failed", #samples - mismatch, mismatch), vim.log.levels.WARN)
+			notify_sticky(string.format("sample tests finished: %d passed, %d failed", #samples - mismatch, mismatch), vim.log.levels.WARN)
 		end
 	end)
 end
@@ -967,12 +977,12 @@ function M.run_current()
 	local bin = vim.fn.expand("%:p:r")
 	local compile_cmd, compile_err = build_command(config.compile_cmd, { src = src, bin = bin })
 	if compile_err then
-		notify("invalid compile_cmd: " .. compile_err, vim.log.levels.ERROR)
+		notify_sticky("invalid compile_cmd: " .. compile_err, vim.log.levels.ERROR)
 		return
 	end
 	local run_cmd, run_err = build_command(config.run_cmd, { src = src, bin = bin })
 	if run_err then
-		notify("invalid run_cmd: " .. run_err, vim.log.levels.ERROR)
+		notify_sticky("invalid run_cmd: " .. run_err, vim.log.levels.ERROR)
 		return
 	end
 

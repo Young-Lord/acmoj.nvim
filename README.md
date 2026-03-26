@@ -107,6 +107,7 @@ Notes:
 
 - Sample testing currently supports `language = "cpp"` and compiles with local `g++`.
 - If compilation fails, plugin reports compiler output directly.
+- Failed `:Acmoj test` notifications are sticky (no auto-dismiss) for easier inspection.
 - `compile_cmd` and `run_cmd` are global templates used by both `:Acmoj test` and `:Acmoj run`.
 - Template placeholders: `{src}` for source path, `{bin}` for output binary path.
 
@@ -134,6 +135,7 @@ vim.keymap.set("n", "<leader>r", "<cmd>Acmoj run<CR>", { desc = "ACMOJ run curre
 - If `Snacks.terminal.open` exists, it is used (interactive input supported).
 - Otherwise falls back to Neovim terminal split (`termopen`).
 - If compile/run command fails, terminal stays open and focus remains there for error inspection.
+- If `compile_cmd` / `run_cmd` template is invalid, error notification is sticky (no auto-dismiss).
 
 ## File naming and initialization
 
