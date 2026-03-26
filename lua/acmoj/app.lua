@@ -784,8 +784,15 @@ local function refresh_views()
 	end
 end
 
-local function poll_submission(submission_id, token, status_map)
+local function poll_submission(submission_id, token, status_map, on_finish)
 	local start_at = vim.uv.now()
+
+	local function finish()
+		active_poll[submission_id] = false
+		if type(on_finish) == "function" then
+			on_finish()
+		end
+	end
 
 	local function poll_once()
 		if active_poll[submission_id] == false then
@@ -795,13 +802,13 @@ local function poll_submission(submission_id, token, status_map)
 		api.get(token, "/submission/" .. submission_id, function(sub, err)
 			if err then
 				notify("query submission failed: " .. err, vim.log.levels.ERROR)
-				active_poll[submission_id] = false
+				finish()
 				return
 			end
 
 			if type(sub) ~= "table" or type(sub.status) ~= "string" then
 				notify("invalid submission response", vim.log.levels.ERROR)
-				active_poll[submission_id] = false
+				finish()
 				return
 			end
 
@@ -818,13 +825,13 @@ local function poll_submission(submission_id, token, status_map)
 					string.format("#%d %s%s", submission_id, human_status(sub.status, status_map), format_resource(sub))
 				local level = accepted and vim.log.levels.INFO or vim.log.levels.WARN
 				notify(msg, level)
-				active_poll[submission_id] = false
+				finish()
 				return
 			end
 
 			if vim.uv.now() - start_at >= config.timeout_ms then
 				notify(string.format("#%d still running, stop polling (timeout)", submission_id), vim.log.levels.WARN)
-				active_poll[submission_id] = false
+				finish()
 				return
 			end
 
@@ -1014,7 +1021,9 @@ function M.submit_current_buffer()
 		return
 	end
 
-	notify(string.format("submitting problem %d ...", problem_id))
+	local submit_notice_id = notify(string.format("submitting problem %d ...", problem_id), vim.log.levels.INFO, {
+		timeout = false,
+	})
 
 	api.get(token, "/meta/info/judge-status", function(status_map, status_err)
 		if status_err then
@@ -1025,12 +1034,18 @@ function M.submit_current_buffer()
 		api.submit(problem_id, config.language, code, token, function(submission_id, submit_err)
 			if submit_err then
 				notify(submit_err, vim.log.levels.ERROR)
+				dismiss_notification(submit_notice_id)
 				return
 			end
 
-			notify(string.format("submitted: #%d, waiting for judge...", submission_id))
+			submit_notice_id = notify(string.format("submitted: #%d, waiting for judge...", submission_id), vim.log.levels.INFO, {
+				timeout = false,
+				replace = submit_notice_id,
+			})
 			active_poll[submission_id] = true
-			poll_submission(submission_id, token, status_map)
+			poll_submission(submission_id, token, status_map, function()
+				dismiss_notification(submit_notice_id)
+			end)
 		end)
 	end)
 end
