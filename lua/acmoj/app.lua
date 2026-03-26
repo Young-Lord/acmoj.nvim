@@ -66,12 +66,45 @@ local cache = cache_module.create(config, state, util, api)
 local files = files_module.create(config, state, util)
 
 local function notify(msg, level, opts)
-	vim.notify(config.notify_prefix .. msg, level or vim.log.levels.INFO, opts)
+	return vim.notify(config.notify_prefix .. msg, level or vim.log.levels.INFO, opts)
 end
 
-local function notify_sticky(msg, level, opts)
+local function dismiss_notification(notification_id)
+	if notification_id == nil then
+		return
+	end
+
+	local ok, notify_module = pcall(require, "notify")
+	if not ok or type(notify_module) ~= "table" or type(notify_module.dismiss) ~= "function" then
+		return
+	end
+
+	pcall(notify_module.dismiss, notification_id, { pending = true, silent = true })
+end
+
+local sticky_notifications = {
+	test = {},
+	run = {},
+}
+
+local function clear_sticky_notifications(scope)
+	local notifications = sticky_notifications[scope]
+	if type(notifications) ~= "table" then
+		return
+	end
+
+	for _, notification_id in ipairs(notifications) do
+		dismiss_notification(notification_id)
+	end
+	sticky_notifications[scope] = {}
+end
+
+local function notify_sticky(scope, msg, level, opts)
 	local merged_opts = vim.tbl_extend("force", { timeout = false }, opts or {})
-	notify(msg, level, merged_opts)
+	local notification_id = notify(msg, level, merged_opts)
+	if type(sticky_notifications[scope]) == "table" then
+		table.insert(sticky_notifications[scope], notification_id)
+	end
 end
 
 local function set_normal_keymap(lhs, rhs, desc)
@@ -1002,8 +1035,18 @@ function M.submit_current_buffer()
 	end)
 end
 
-function M.test_samples()
+function M.test_samples(sample_index_arg)
 	vim.cmd("silent! w")
+	clear_sticky_notifications("test")
+
+	local sample_index = nil
+	if sample_index_arg and sample_index_arg ~= "" then
+		sample_index = tonumber(sample_index_arg)
+		if not sample_index or sample_index < 1 or sample_index ~= math.floor(sample_index) then
+			notify("sample index must be a positive integer", vim.log.levels.ERROR)
+			return
+		end
+	end
 
 	if config.language ~= "cpp" then
 		notify("sample testing currently supports only language=cpp", vim.log.levels.ERROR)
@@ -1041,9 +1084,22 @@ function M.test_samples()
 			return
 		end
 
+		local test_targets = {}
+		if sample_index then
+			if sample_index > #samples then
+				notify(string.format("sample index out of range: %d (total: %d)", sample_index, #samples), vim.log.levels.ERROR)
+				return
+			end
+			table.insert(test_targets, { idx = sample_index, sample = samples[sample_index] })
+		else
+			for i, sample in ipairs(samples) do
+				table.insert(test_targets, { idx = i, sample = sample })
+			end
+		end
+
 		local binary, temp_dir, compile_err = compile_cpp_code(code)
 		if compile_err then
-			notify_sticky("编译失败:\n" .. compile_err, vim.log.levels.ERROR)
+			notify_sticky("test", "编译失败:\n" .. compile_err, vim.log.levels.ERROR)
 			if temp_dir then
 				pcall(vim.fn.delete, temp_dir, "rf")
 			end
@@ -1051,7 +1107,10 @@ function M.test_samples()
 		end
 
 		local mismatch = 0
-		for i, sample in ipairs(samples) do
+		local first_mismatch_detail = nil
+		for _, target in ipairs(test_targets) do
+			local i = target.idx
+			local sample = target.sample
 			local actual, run_err = run_binary_with_input(binary, sample.input)
 			if run_err then
 				actual = (actual or "") .. "\n[runtime error] " .. run_err
@@ -1061,8 +1120,8 @@ function M.test_samples()
 			local actual_norm = normalize_output(actual)
 			if expected_norm ~= actual_norm then
 				mismatch = mismatch + 1
-				notify_sticky(
-					table.concat({
+				if not first_mismatch_detail then
+					first_mismatch_detail = table.concat({
 						string.format("测试点 #%d 结果不一致", i),
 						"输入:",
 						render_text_or_empty(sample.input),
@@ -1070,23 +1129,35 @@ function M.test_samples()
 						render_text_or_empty(sample.expected),
 						"实际输出:",
 						render_text_or_empty(actual),
-					}, "\n"),
-					vim.log.levels.WARN
-				)
+					}, "\n")
+				end
 			end
 		end
 
 		pcall(vim.fn.delete, temp_dir, "rf")
+		local total = #test_targets
 		if mismatch == 0 then
-			notify(string.format("sample tests passed (%d/%d)", #samples, #samples), vim.log.levels.INFO)
+			notify(string.format("sample tests passed (%d/%d)", total, total), vim.log.levels.INFO)
 		else
-			notify_sticky(string.format("sample tests finished: %d passed, %d failed", #samples - mismatch, mismatch), vim.log.levels.WARN)
+			if first_mismatch_detail then
+				local lines = {
+					first_mismatch_detail,
+					string.format("sample tests finished: %d passed, %d failed", total - mismatch, mismatch),
+				}
+				if mismatch > 1 then
+					table.insert(lines, string.format("(only showing first mismatch, %d more failed)", mismatch - 1))
+				end
+				notify_sticky("test", table.concat(lines, "\n"), vim.log.levels.WARN)
+			else
+				notify_sticky("test", string.format("sample tests finished: %d passed, %d failed", total - mismatch, mismatch), vim.log.levels.WARN)
+			end
 		end
 	end)
 end
 
 function M.run_current()
 	vim.cmd("silent! w")
+	clear_sticky_notifications("run")
 
 	local src = vim.fn.expand("%:p")
 	if src == "" then
@@ -1098,12 +1169,12 @@ function M.run_current()
 	local bin = vim.fn.expand("%:p:r")
 	local compile_cmd, compile_err = build_command(config.compile_cmd, { src = src, bin = bin })
 	if compile_err then
-		notify_sticky("invalid compile_cmd: " .. compile_err, vim.log.levels.ERROR)
+		notify_sticky("run", "invalid compile_cmd: " .. compile_err, vim.log.levels.ERROR)
 		return
 	end
 	local run_cmd, run_err = build_command(config.run_cmd, { src = src, bin = bin })
 	if run_err then
-		notify_sticky("invalid run_cmd: " .. run_err, vim.log.levels.ERROR)
+		notify_sticky("run", "invalid run_cmd: " .. run_err, vim.log.levels.ERROR)
 		return
 	end
 

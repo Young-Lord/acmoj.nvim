@@ -9,9 +9,9 @@ local subcommands = {
   push = { run = function(actions)
     actions.submit()
   end, desc = "submit current buffer", min_args = 0, max_args = 0 },
-  test = { run = function(actions)
-    actions.test_samples()
-  end, desc = "run all problem samples", min_args = 0, max_args = 0 },
+  test = { run = function(actions, args)
+    actions.test_samples(args[1])
+  end, desc = "run samples (or one by index)", min_args = 0, max_args = 1 },
   run = { run = function(actions)
     actions.run_current()
   end, desc = "compile and run current file", min_args = 0, max_args = 0 },

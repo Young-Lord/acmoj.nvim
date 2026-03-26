@@ -96,7 +96,7 @@ Quick mapping config:
 Use a single command hub with concise subcommands:
 
 - `:Acmoj push` submit current buffer.
-- `:Acmoj test` run all samples for current problem, compare with trimmed output (strip leading/trailing blank lines and per-line surrounding whitespace), and print `输入/理论输出/实际输出` for each mismatch.
+- `:Acmoj test [sample_index]` run all samples (or only one sample by index) for current problem, compare with trimmed output (strip leading/trailing blank lines and per-line surrounding whitespace), and print `输入/理论输出/实际输出` for the first mismatch.
 - `:Acmoj run` quick compile + run current file in an interactive terminal.
 - `:Acmoj` (without subcommand) is equivalent to `:Acmoj sets`.
 - `:Acmoj help` show command help.
@@ -123,7 +123,7 @@ Notes:
 
 - Sample testing currently supports `language = "cpp"` and compiles with local `g++`.
 - If compilation fails, plugin reports compiler output directly.
-- Failed `:Acmoj test` notifications are sticky (no auto-dismiss) for easier inspection.
+- Failed `:Acmoj test` notifications are sticky (no auto-dismiss) for easier inspection, and the previous sticky test notification is dismissed when you run `:Acmoj test` again.
 - `compile_cmd` and `run_cmd` are global templates used by both `:Acmoj test` and `:Acmoj run`.
 - Template placeholders: `{src}` for source path, `{bin}` for output binary path.
 
@@ -151,7 +151,7 @@ vim.keymap.set("n", "<leader>r", "<cmd>Acmoj run<CR>", { desc = "ACMOJ run curre
 - If `Snacks.terminal.open` exists, it is used (interactive input supported).
 - Otherwise falls back to Neovim terminal split (`termopen`).
 - If compile/run command fails, terminal stays open and focus remains there for error inspection.
-- If `compile_cmd` / `run_cmd` template is invalid, error notification is sticky (no auto-dismiss).
+- If `compile_cmd` / `run_cmd` template is invalid, error notification is sticky (no auto-dismiss), and the previous sticky run notification is dismissed when you run `:Acmoj run` again.
 
 ## File naming and initialization
 
