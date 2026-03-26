@@ -22,6 +22,11 @@ local config = {
 	map_problemsets_lhs = "<leader>ss",
 	map_run = false,
 	map_run_lhs = "<leader>r",
+	map_quick = true,
+	map_quick_list_lhs = "<leader>rl",
+	map_quick_test_lhs = "<leader>rt",
+	map_quick_run_lhs = "<leader>rr",
+	map_quick_submit_lhs = "<leader>rs",
 	solution_dir = "solutions",
 	solution_ext = "cpp",
 	template_file = "~/.config/nvim/acmoj/template.cpp",
@@ -67,6 +72,19 @@ end
 local function notify_sticky(msg, level, opts)
 	local merged_opts = vim.tbl_extend("force", { timeout = false }, opts or {})
 	notify(msg, level, merged_opts)
+end
+
+local function set_normal_keymap(lhs, rhs, desc)
+	if lhs == false or lhs == nil then
+		return
+	end
+	if type(lhs) ~= "string" then
+		return
+	end
+	if util.trim(lhs) == "" then
+		return
+	end
+	vim.keymap.set("n", lhs, rhs, { desc = desc })
 end
 
 local function ensure_highlights()
@@ -182,6 +200,38 @@ local function render_text_or_empty(text)
 	return value
 end
 
+local function normalize_newlines(text)
+	local value = tostring(text or "")
+	return value:gsub("\r\n", "\n"):gsub("\r", "\n")
+end
+
+local function first_non_empty_string(tbl, keys)
+	if type(tbl) ~= "table" then
+		return ""
+	end
+
+	for _, key in ipairs(keys or {}) do
+		local value = tbl[key]
+		if type(value) == "string" then
+			value = util.trim(normalize_newlines(value))
+			if value ~= "" then
+				return value
+			end
+		end
+	end
+
+	return ""
+end
+
+local function extract_problem_section(problem, section)
+	local section_keys = {
+		description = { "description", "desc", "problem_description" },
+		input = { "input", "input_description", "input_format", "input_desc" },
+		output = { "output", "output_description", "output_format", "output_desc" },
+	}
+	return first_non_empty_string(problem, section_keys[section] or {})
+end
+
 local function extract_samples(problem)
 	if type(problem) ~= "table" then
 		return {}
@@ -189,6 +239,9 @@ local function extract_samples(problem)
 
 	local out = {}
 	local examples = problem.examples
+	if type(examples) ~= "table" then
+		examples = problem.samples
+	end
 	if type(examples) ~= "table" then
 		return out
 	end
@@ -203,6 +256,83 @@ local function extract_samples(problem)
 	end
 
 	return out
+end
+
+local function render_problem_statement_lines(problem, problem_detail)
+	local detail = type(problem_detail) == "table" and problem_detail or {}
+	local title = tostring(detail.title or problem.title or "")
+	local samples = extract_samples(detail)
+	if #samples == 0 then
+		samples = extract_samples(problem)
+	end
+
+	local lines = {
+		string.format("ACMOJ %s %s", tostring(problem.id or ""), title),
+		"",
+	}
+
+	local desc = extract_problem_section(detail, "description")
+	if desc == "" then
+		desc = extract_problem_section(problem, "description")
+	end
+	if desc == "" then
+		table.insert(lines, "(empty)")
+	else
+		for _, line in ipairs(vim.split(desc, "\n", { plain = true, trimempty = false })) do
+			table.insert(lines, line)
+		end
+	end
+
+	table.insert(lines, "")
+	table.insert(lines, "输入格式:")
+	local input_desc = extract_problem_section(detail, "input")
+	if input_desc == "" then
+		input_desc = extract_problem_section(problem, "input")
+	end
+	if input_desc == "" then
+		table.insert(lines, "(empty)")
+	else
+		for _, line in ipairs(vim.split(input_desc, "\n", { plain = true, trimempty = false })) do
+			table.insert(lines, line)
+		end
+	end
+
+	table.insert(lines, "")
+	table.insert(lines, "输出格式:")
+	local output_desc = extract_problem_section(detail, "output")
+	if output_desc == "" then
+		output_desc = extract_problem_section(problem, "output")
+	end
+	if output_desc == "" then
+		table.insert(lines, "(empty)")
+	else
+		for _, line in ipairs(vim.split(output_desc, "\n", { plain = true, trimempty = false })) do
+			table.insert(lines, line)
+		end
+	end
+
+	table.insert(lines, "")
+	table.insert(lines, "样例:")
+	if #samples == 0 then
+		table.insert(lines, "(none)")
+	else
+		for idx, sample in ipairs(samples) do
+			table.insert(lines, string.format("[样例 %d]", idx))
+			table.insert(lines, "输入:")
+			for _, line in ipairs(split_lines_keep_empty(sample.input)) do
+				table.insert(lines, line)
+			end
+			table.insert(lines, "输出:")
+			for _, line in ipairs(split_lines_keep_empty(sample.expected)) do
+				table.insert(lines, line)
+			end
+			if idx < #samples then
+				table.insert(lines, "")
+			end
+		end
+	end
+
+	return lines
 end
 
 local function compile_cpp_code(code)
@@ -388,22 +518,9 @@ local function focus_or_open_desc_window(buf)
 	return win
 end
 
-local function render_problem_description(problem, description)
+local function render_problem_description(problem, problem_detail)
 	local buf = ensure_problem_desc_buffer()
-	local desc = tostring(description or "")
-	desc = desc:gsub("\r\n", "\n"):gsub("\r", "\n")
-
-	local lines = {
-		string.format("ACMOJ %s %s", tostring(problem.id or ""), tostring(problem.title or "")),
-		"",
-	}
-	if desc == "" then
-		table.insert(lines, "(empty)")
-	else
-		for _, line in ipairs(vim.split(desc, "\n", { plain = true, trimempty = false })) do
-			table.insert(lines, line)
-		end
-	end
+	local lines = render_problem_statement_lines(problem, problem_detail)
 
 	vim.api.nvim_set_option_value("modifiable", true, { buf = buf })
 	vim.api.nvim_set_option_value("readonly", false, { buf = buf })
@@ -427,30 +544,34 @@ local function show_problem_description(problem)
 	vim.api.nvim_set_current_win(previous_win)
 
 	local cached = state.problem_desc_cache[problem.id]
-	if type(cached) == "string" then
+	if type(cached) == "table" then
 		render_problem_description(problem, cached)
 		return
 	end
+	if type(cached) == "string" then
+		render_problem_description(problem, { description = cached })
+		return
+	end
 
-	render_problem_description(problem, "loading description ...")
+	render_problem_description(problem, { description = "loading description ..." })
 	local token, token_err = files.read_token()
 	if token_err then
-		render_problem_description(problem, "load description failed: " .. token_err)
+		render_problem_description(problem, { description = "load description failed: " .. token_err })
 		return
 	end
 
 	api.get(token, "/problem/" .. problem.id, function(body, err)
 		if err then
-			render_problem_description(problem, "load description failed: " .. err)
+			render_problem_description(problem, { description = "load description failed: " .. err })
 			return
 		end
 
-		local desc = ""
-		if type(body) == "table" and type(body.description) == "string" then
-			desc = body.description
+		local detail = {}
+		if type(body) == "table" then
+			detail = body
 		end
-		state.problem_desc_cache[problem.id] = desc
-		render_problem_description(problem, desc)
+		state.problem_desc_cache[problem.id] = detail
+		render_problem_description(problem, detail)
 	end)
 end
 
@@ -1114,18 +1235,25 @@ function M.setup(opts)
 	end
 
 	if config.map_submit then
-		vim.keymap.set("n", config.map_lhs, M.submit_current_buffer, { desc = "Submit current buffer to ACMOJ" })
+		set_normal_keymap(config.map_lhs, M.submit_current_buffer, "Submit current buffer to ACMOJ")
 	end
 
 	if config.map_problem_nav then
-		vim.keymap.set("n", config.map_problemsets_lhs, M.problemsets, { desc = "ACMOJ problemset selector" })
-		vim.keymap.set("n", config.map_problem_next_lhs, M.problem_next, { desc = "ACMOJ next problem" })
-		vim.keymap.set("n", config.map_problem_prev_lhs, M.problem_prev, { desc = "ACMOJ previous problem" })
-		vim.keymap.set("n", config.map_problem_list_lhs, M.problem_list, { desc = "ACMOJ problemset list" })
+		set_normal_keymap(config.map_problemsets_lhs, M.problemsets, "ACMOJ problemset selector")
+		set_normal_keymap(config.map_problem_next_lhs, M.problem_next, "ACMOJ next problem")
+		set_normal_keymap(config.map_problem_prev_lhs, M.problem_prev, "ACMOJ previous problem")
+		set_normal_keymap(config.map_problem_list_lhs, M.problem_list, "ACMOJ problemset list")
 	end
 
 	if config.map_run then
-		vim.keymap.set("n", config.map_run_lhs, M.run_current, { desc = "ACMOJ compile and run current file" })
+		set_normal_keymap(config.map_run_lhs, M.run_current, "ACMOJ compile and run current file")
+	end
+
+	if config.map_quick then
+		set_normal_keymap(config.map_quick_list_lhs, M.problem_list, "ACMOJ problem list")
+		set_normal_keymap(config.map_quick_test_lhs, M.test_samples, "ACMOJ test samples")
+		set_normal_keymap(config.map_quick_run_lhs, M.run_current, "ACMOJ run current code")
+		set_normal_keymap(config.map_quick_submit_lhs, M.submit_current_buffer, "ACMOJ submit current problem")
 	end
 end
 

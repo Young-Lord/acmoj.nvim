@@ -1,6 +1,6 @@
 # acmoj.nvim
 
-Submit ACMOJ code from NeoVim with `<leader>s`, poll judge results, and manage problemset workflows.
+Submit ACMOJ code from NeoVim, poll judge results, and manage problemset workflows.
 
 ## Requirements
 
@@ -36,7 +36,12 @@ Examples:
 }
 ```
 
-Default mapping is `<leader>s` in normal mode.
+Quick mappings are enabled by default in normal mode:
+
+- `<leader>rl` open current problem list
+- `<leader>rt` run sample tests
+- `<leader>rr` compile and run current code
+- `<leader>rs` submit current problem
 
 ## Optional setup
 
@@ -56,6 +61,11 @@ require("acmoj").setup({
   map_problem_list_lhs = "<leader>sl",
   map_run = false,
   map_run_lhs = "<leader>r",
+  map_quick = true,
+  map_quick_list_lhs = "<leader>rl",
+  map_quick_test_lhs = "<leader>rt",
+  map_quick_run_lhs = "<leader>rr",
+  map_quick_submit_lhs = "<leader>rs",
   solution_dir = "solutions",
   solution_ext = "cpp",
   template_file = "~/.config/nvim/acmoj/template.cpp",
@@ -74,6 +84,12 @@ Template file placeholders:
 - `{problem_title}`
 - `{problemset_id}`
 - `{problemset_name}`
+
+Quick mapping config:
+
+- Set `map_quick = false` to disable the whole quick mapping group.
+- Set each `map_quick_*_lhs` to a custom lhs to remap.
+- Set a single `map_quick_*_lhs = false` (or `nil`) to disable only that one mapping.
 
 ## Manual command
 
@@ -99,7 +115,7 @@ Problem description panel notes:
 
 - Opens by default when entering a problem in a split window.
 - `:Acmoj desc` can toggle it on/off.
-- Content uses raw problem description text only (no sample display, no LaTeX rendering).
+- Content shows problem description, input format, output format, and samples (no LaTeX rendering).
 - Newlines are normalized from `\r\n`/`\r` to `\n`.
 - Buffer is read-only and uses `nofile`.
 
