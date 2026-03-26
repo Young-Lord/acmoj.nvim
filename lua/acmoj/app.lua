@@ -872,6 +872,8 @@ function M.submit_current_buffer()
 end
 
 function M.test_samples()
+	vim.cmd("silent! w")
+
 	if config.language ~= "cpp" then
 		notify("sample testing currently supports only language=cpp", vim.log.levels.ERROR)
 		return
