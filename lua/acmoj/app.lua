@@ -137,6 +137,74 @@ local function human_status(status, status_map)
 	return status
 end
 
+local function tz_offset_seconds_at(epoch_seconds)
+	local local_t = os.date("*t", epoch_seconds)
+	local utc_t = os.date("!*t", epoch_seconds)
+	return os.difftime(os.time(local_t), os.time(utc_t))
+end
+
+-- Parse RFC3339-ish timestamps like:
+-- 2025-04-21T12:34:56Z
+-- 2025-04-21T12:34:56+08:00
+-- 2025-04-21T12:34:56.123456-05:30
+-- Returns epoch seconds (number) or nil.
+local function parse_datetime_to_epoch(value)
+	if type(value) ~= "string" then
+		return nil
+	end
+	local s = util.trim(value)
+	if s == "" then
+		return nil
+	end
+
+	-- strip fractional seconds
+	s = s:gsub("(%d%d:%d%d:%d%d)%.%d+", "%1")
+
+	-- extract timezone suffix if any
+	local tz = s:match("([Zz])$") or s:match("([+-]%d%d:?%d%d)$")
+	local tz_seconds = nil
+	if tz then
+		if tz == "Z" or tz == "z" then
+			tz_seconds = 0
+		else
+			local sign, hh, mm = tz:match("^([+-])(%d%d):?(%d%d)$")
+			if sign and hh and mm then
+				tz_seconds = (tonumber(hh) * 60 + tonumber(mm)) * 60
+				if sign == "-" then
+					tz_seconds = -tz_seconds
+				end
+			end
+		end
+		s = s:gsub(vim.pesc(tz) .. "$", "")
+	end
+
+	-- normalize separator
+	s = s:gsub(" ", "T")
+
+	local ok, base_epoch = pcall(vim.fn.strptime, "%Y-%m-%dT%H:%M:%S", s)
+	if not ok or type(base_epoch) ~= "number" then
+		return nil
+	end
+
+	local local_offset = tz_offset_seconds_at(base_epoch)
+	if tz_seconds == nil then
+		-- no timezone in string: assume local time
+		tz_seconds = local_offset
+	end
+
+	-- base_epoch treated as local time; convert to true absolute epoch by reconciling tz vs local offset
+	return base_epoch - (tz_seconds - local_offset)
+end
+
+local function problemset_deadline_epoch(problemset)
+	if type(problemset) ~= "table" then
+		return nil
+	end
+	-- "提交截止时间"：若允许迟交，late_submission_deadline 才是最终截止；否则 end_time
+	return parse_datetime_to_epoch(problemset.late_submission_deadline)
+		or parse_datetime_to_epoch(problemset.end_time)
+end
+
 local function is_accepted_status(status)
 	if type(status) ~= "string" then
 		return false
@@ -702,7 +770,9 @@ local function render_problemset_selector()
 		local line = string.format("[%d] #%d %s (%d/%d)", idx, ps.id, ps.name or "", accepted, total)
 		table.insert(lines, line)
 		line_map[#lines] = ps.id
-		if total > 0 and accepted == total then
+		local deadline = problemset_deadline_epoch(ps)
+		local expired = deadline ~= nil and os.time() > deadline
+		if expired or (total > 0 and accepted == total) then
 			table.insert(grey_lines, #lines)
 		end
 	end
