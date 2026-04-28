@@ -999,29 +999,33 @@ local function load_problemsets_and_show()
 		return
 	end
 
-	cache.refresh_accepted_cache_if_stale(token, 7 * 24 * 60 * 60, function(cache_err)
-		if cache_err then
-			notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.WARN)
+	api.get(token, "/user/problemsets", function(body, err)
+		if err then
+			notify("load problemsets failed: " .. err, vim.log.levels.ERROR)
+			return
+		end
+		if type(body) ~= "table" or type(body.problemsets) ~= "table" then
+			notify("invalid problemsets response", vim.log.levels.ERROR)
+			return
 		end
 
-		api.get(token, "/user/problemsets", function(body, err)
-			if err then
-				notify("load problemsets failed: " .. err, vim.log.levels.ERROR)
-				return
-			end
-			if type(body) ~= "table" or type(body.problemsets) ~= "table" then
-				notify("invalid problemsets response", vim.log.levels.ERROR)
-				return
-			end
+		set_problemsets(body.problemsets)
+		render_problemset_selector()
+		local reuse_current = state.problemset_buf
+			and vim.api.nvim_buf_is_valid(state.problemset_buf)
+			and vim.api.nvim_win_get_buf(0) == state.problemset_buf
+		focus_buffer({ buf = state.selector_buf, reuse_current = reuse_current })
+		close_windows_with_buffer(state.problemset_buf)
+		focus_selector_preferred_item()
 
-			set_problemsets(body.problemsets)
-			render_problemset_selector()
-			local reuse_current = state.problemset_buf
-				and vim.api.nvim_buf_is_valid(state.problemset_buf)
-				and vim.api.nvim_win_get_buf(0) == state.problemset_buf
-			focus_buffer({ buf = state.selector_buf, reuse_current = reuse_current })
-			close_windows_with_buffer(state.problemset_buf)
-			focus_selector_preferred_item()
+		cache.refresh_accepted_cache_if_stale(token, 7 * 24 * 60 * 60, function(cache_err, refreshed)
+			if cache_err then
+				notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.WARN)
+				return
+			end
+			if refreshed then
+				refresh_views()
+			end
 		end)
 	end)
 end

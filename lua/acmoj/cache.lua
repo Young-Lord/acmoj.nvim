@@ -161,21 +161,23 @@ function M.create(config, state, util, api)
     fetch(nil, 1)
   end
 
+  -- Refresh accepted submissions cache if stale.
+  -- on_done(err, refreshed): refreshed=true means a refresh was attempted (success or fail).
   local function refresh_accepted_cache_if_stale(token, max_age_seconds, on_done)
     local max_age = tonumber(max_age_seconds) or 0
     local last = state.cache.accepted_cache_refreshed_at
     if type(last) == "number" and max_age > 0 and (os.time() - last) <= max_age then
-      on_done(nil)
+      on_done(nil, false)
       return
     end
 
     resolve_username(token, function(username, user_err)
       if user_err then
-        on_done(user_err)
+        on_done(user_err, true)
         return
       end
       warm_accepted_cache(token, username, function(cache_err)
-        on_done(cache_err)
+        on_done(cache_err, true)
       end)
     end)
   end
