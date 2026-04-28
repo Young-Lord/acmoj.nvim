@@ -5,6 +5,7 @@ local function empty_cache()
     accepted_problems = {},
     token_to_username = {},
     cache_username = nil,
+    accepted_cache_refreshed_at = nil,
   }
 end
 
@@ -21,6 +22,7 @@ function M.create(config, state, util, api)
       accepted_problems = state.cache.accepted_problems,
       token_to_username = state.cache.token_to_username,
       cache_username = state.cache.cache_username,
+      accepted_cache_refreshed_at = state.cache.accepted_cache_refreshed_at,
     }
     local ok, encoded = pcall(vim.json.encode, payload)
     if not ok then
@@ -47,10 +49,15 @@ function M.create(config, state, util, api)
     local accepted = type(decoded.accepted_problems) == "table" and decoded.accepted_problems or {}
     local token_to_username = type(decoded.token_to_username) == "table" and decoded.token_to_username or {}
     local cache_username = type(decoded.cache_username) == "string" and decoded.cache_username or nil
+    local accepted_cache_refreshed_at = decoded.accepted_cache_refreshed_at
+    if type(accepted_cache_refreshed_at) ~= "number" then
+      accepted_cache_refreshed_at = nil
+    end
     state.cache = {
       accepted_problems = accepted,
       token_to_username = token_to_username,
       cache_username = cache_username,
+      accepted_cache_refreshed_at = accepted_cache_refreshed_at,
     }
   end
 
@@ -106,10 +113,12 @@ function M.create(config, state, util, api)
     if state.cache.cache_username ~= username then
       state.cache.accepted_problems = {}
       state.cache.cache_username = username
+      state.cache.accepted_cache_refreshed_at = nil
     end
 
     local function fetch(cursor, pages)
       if pages > page_limit then
+        state.cache.accepted_cache_refreshed_at = os.time()
         save_cache()
         on_done(nil)
         return
@@ -143,11 +152,32 @@ function M.create(config, state, util, api)
           return
         end
 
+        state.cache.accepted_cache_refreshed_at = os.time()
+        save_cache()
         on_done(nil)
       end)
     end
 
     fetch(nil, 1)
+  end
+
+  local function refresh_accepted_cache_if_stale(token, max_age_seconds, on_done)
+    local max_age = tonumber(max_age_seconds) or 0
+    local last = state.cache.accepted_cache_refreshed_at
+    if type(last) == "number" and max_age > 0 and (os.time() - last) <= max_age then
+      on_done(nil)
+      return
+    end
+
+    resolve_username(token, function(username, user_err)
+      if user_err then
+        on_done(user_err)
+        return
+      end
+      warm_accepted_cache(token, username, function(cache_err)
+        on_done(cache_err)
+      end)
+    end)
   end
 
   local function refresh_cache_for_new_token(token, on_error)
@@ -184,6 +214,7 @@ function M.create(config, state, util, api)
     save_cache = save_cache,
     mark_problem_accepted = mark_problem_accepted,
     is_problem_accepted = is_problem_accepted,
+    refresh_accepted_cache_if_stale = refresh_accepted_cache_if_stale,
     refresh_cache_for_new_token = refresh_cache_for_new_token,
     clear_cache_file = clear_cache_file,
   }

@@ -54,6 +54,7 @@ local state = {
 		accepted_problems = {},
 		token_to_username = {},
 		cache_username = nil,
+		accepted_cache_refreshed_at = nil,
 	},
 }
 
@@ -998,24 +999,30 @@ local function load_problemsets_and_show()
 		return
 	end
 
-	api.get(token, "/user/problemsets", function(body, err)
-		if err then
-			notify("load problemsets failed: " .. err, vim.log.levels.ERROR)
-			return
-		end
-		if type(body) ~= "table" or type(body.problemsets) ~= "table" then
-			notify("invalid problemsets response", vim.log.levels.ERROR)
-			return
+	cache.refresh_accepted_cache_if_stale(token, 7 * 24 * 60 * 60, function(cache_err)
+		if cache_err then
+			notify("refresh accepted cache failed: " .. cache_err, vim.log.levels.WARN)
 		end
 
-		set_problemsets(body.problemsets)
-		render_problemset_selector()
-		local reuse_current = state.problemset_buf
-			and vim.api.nvim_buf_is_valid(state.problemset_buf)
-			and vim.api.nvim_win_get_buf(0) == state.problemset_buf
-		focus_buffer({ buf = state.selector_buf, reuse_current = reuse_current })
-		close_windows_with_buffer(state.problemset_buf)
-		focus_selector_preferred_item()
+		api.get(token, "/user/problemsets", function(body, err)
+			if err then
+				notify("load problemsets failed: " .. err, vim.log.levels.ERROR)
+				return
+			end
+			if type(body) ~= "table" or type(body.problemsets) ~= "table" then
+				notify("invalid problemsets response", vim.log.levels.ERROR)
+				return
+			end
+
+			set_problemsets(body.problemsets)
+			render_problemset_selector()
+			local reuse_current = state.problemset_buf
+				and vim.api.nvim_buf_is_valid(state.problemset_buf)
+				and vim.api.nvim_win_get_buf(0) == state.problemset_buf
+			focus_buffer({ buf = state.selector_buf, reuse_current = reuse_current })
+			close_windows_with_buffer(state.problemset_buf)
+			focus_selector_preferred_item()
+		end)
 	end)
 end
 
@@ -1091,9 +1098,7 @@ function M.submit_current_buffer()
 		return
 	end
 
-	local submit_notice_id = notify(string.format("submitting problem %d ...", problem_id), vim.log.levels.INFO, {
-		timeout = false,
-	})
+	local submit_notice_id = nil
 
 	api.get(token, "/meta/info/judge-status", function(status_map, status_err)
 		if status_err then
@@ -1104,13 +1109,11 @@ function M.submit_current_buffer()
 		api.submit(problem_id, config.language, code, token, function(submission_id, submit_err)
 			if submit_err then
 				notify(submit_err, vim.log.levels.ERROR)
-				dismiss_notification(submit_notice_id)
 				return
 			end
 
 			submit_notice_id = notify(string.format("submitted: #%d, waiting for judge...", submission_id), vim.log.levels.INFO, {
-				timeout = false,
-				replace = submit_notice_id,
+				timeout = 5000,
 			})
 			active_poll[submission_id] = true
 			poll_submission(submission_id, token, status_map, function()
@@ -1156,7 +1159,7 @@ function M.test_samples(sample_index_arg)
 		return
 	end
 
-	notify(string.format("loading samples for problem %d ...", problem_id))
+	notify_sticky("test", string.format("loading samples for problem %d ...", problem_id), vim.log.levels.INFO, { timeout = 2000 })
 	api.get(token, "/problem/" .. problem_id, function(problem, err)
 		if err then
 			notify("load problem failed: " .. err, vim.log.levels.ERROR)
@@ -1222,7 +1225,7 @@ function M.test_samples(sample_index_arg)
 		pcall(vim.fn.delete, temp_dir, "rf")
 		local total = #test_targets
 		if mismatch == 0 then
-			notify(string.format("sample tests passed (%d/%d)", total, total), vim.log.levels.INFO)
+			notify_sticky("test", string.format("sample tests passed (%d/%d)", total, total), vim.log.levels.INFO, { timeout = 3500 })
 		else
 			if first_mismatch_detail then
 				local lines = {
