@@ -127,15 +127,41 @@ local function ensure_highlights()
 	end
 	vim.api.nvim_set_hl(0, "AcmojDim", { link = "Comment", default = true })
 	vim.api.nvim_set_hl(0, "AcmojHeader", { bold = true, default = true })
+	vim.api.nvim_set_hl(0, "AcmojStatusAC", { link = "DiagnosticOk", default = true })
+	vim.api.nvim_set_hl(0, "AcmojStatusBad", { link = "DiagnosticError", default = true })
 	highlights_created = true
 end
 
 local function human_status(status, status_map)
 	local info = status_map and status_map[status]
-	if info and info.name_short then
-		return string.format("%s (%s)", info.name_short, status)
+	local name_short = info and info.name_short
+	if type(name_short) == "string" and util.trim(name_short) ~= "" then
+		return name_short
 	end
 	return status
+end
+
+local function notify_with_inline_highlight(msg, level, needle, hl_group)
+	if type(needle) ~= "string" or needle == "" or type(hl_group) ~= "string" or hl_group == "" then
+		return notify(msg, level)
+	end
+
+	ensure_highlights()
+	return notify(msg, level, {
+		on_open = function(win)
+			local buf = vim.api.nvim_win_get_buf(win)
+			local lines = vim.api.nvim_buf_get_lines(buf, 0, 1, false)
+			local line = lines[1]
+			if type(line) ~= "string" then
+				return
+			end
+			local s, e = line:find(needle, 1, true)
+			if not s then
+				return
+			end
+			vim.api.nvim_buf_add_highlight(buf, -1, hl_group, 0, s - 1, e)
+		end,
+	})
 end
 
 local function tz_offset_seconds_at(epoch_seconds)
@@ -892,10 +918,11 @@ local function poll_submission(submission_id, token, status_map, on_finish)
 					refresh_views()
 				end
 
-				local msg =
-					string.format("#%d %s%s", submission_id, human_status(sub.status, status_map), format_resource(sub))
+				local status_text = human_status(sub.status, status_map)
+				local msg = string.format("#%d %s%s", submission_id, status_text, format_resource(sub))
 				local level = accepted and vim.log.levels.INFO or vim.log.levels.WARN
-				notify(msg, level)
+				local status_hl = accepted and "AcmojStatusAC" or "AcmojStatusBad"
+				notify_with_inline_highlight(msg, level, status_text, status_hl)
 				finish()
 				return
 			end
