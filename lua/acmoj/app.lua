@@ -8,7 +8,7 @@ local M = {}
 
 local config = {
 	base_url = "https://acm.sjtu.edu.cn/OnlineJudge/api/v1",
-	token_file = "~/.config/nvim/acmoj/token.txt",
+	token_file = vim.fs.joinpath(vim.fn.stdpath("config"), "acmoj", "token.txt"),
 	language = "cpp",
 	poll_interval_ms = 1200,
 	timeout_ms = 120000,
@@ -27,10 +27,10 @@ local config = {
 	map_quick_test_lhs = "<leader>rt",
 	map_quick_run_lhs = "<leader>rr",
 	map_quick_submit_lhs = "<leader>rs",
-	solution_dir = "solutions",
+	solution_dir = vim.fs.joinpath(vim.fn.stdpath("data"), "acmoj.nvim"),
 	solution_ext = "cpp",
-	template_file = "~/.config/nvim/acmoj/template.cpp",
-	cache_file = "~/.local/state/nvim/acmoj/cache.json",
+	template_file = vim.fs.joinpath(vim.fn.stdpath("config"), "acmoj", "template.cpp"),
+	cache_file = vim.fs.joinpath(vim.fn.stdpath("state"), "acmoj", "cache.json"),
 	accepted_cache_page_limit = 50,
 	compile_cmd = "g++ -std=c++17 -O2 -pipe {src} -o {bin}",
 	run_cmd = "{bin}",
@@ -136,7 +136,7 @@ local function human_status(status, status_map)
 	local info = status_map and status_map[status]
 	local name_short = info and info.name_short
 	if type(name_short) == "string" and util.trim(name_short) ~= "" then
-		return name_short
+ 		return name_short
 	end
 	return status
 end
