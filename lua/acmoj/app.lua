@@ -13,20 +13,15 @@ local config = {
 	poll_interval_ms = 1200,
 	timeout_ms = 120000,
 	notify_prefix = "[ACMOJ] ",
-	map_submit = true,
-	map_lhs = "<leader>s",
 	map_problem_nav = true,
-	map_problem_next_lhs = "<leader>sn",
-	map_problem_prev_lhs = "<leader>sp",
-	map_problem_list_lhs = "<leader>sl",
-	map_problemsets_lhs = "<leader>ss",
-	map_run = false,
-	map_run_lhs = "<leader>r",
+	map_problemsets_lhs = "<leader>ra", -- all problemsets
+	map_problem_list_lhs = "<leader>rl", -- problems in current problemset
+	map_problem_next_lhs = "<leader>rn", -- next problem in current problemset
+	map_problem_prev_lhs = "<leader>rp", -- previous problem in current problemset
 	map_quick = true,
-	map_quick_list_lhs = "<leader>rl",
-	map_quick_test_lhs = "<leader>rt",
-	map_quick_run_lhs = "<leader>rr",
-	map_quick_submit_lhs = "<leader>rs",
+	map_quick_test_lhs = "<leader>rt", -- test samples
+	map_quick_run_lhs = "<leader>rr", -- run current file
+	map_quick_submit_lhs = "<leader>rs", -- submit current file
 	solution_dir = vim.fs.joinpath(vim.fn.stdpath("data"), "acmoj.nvim"),
 	solution_ext = "cpp",
 	template_file = vim.fs.joinpath(vim.fn.stdpath("config"), "acmoj", "template.cpp"),
@@ -1424,23 +1419,14 @@ function M.setup(opts)
 		commands_created = true
 	end
 
-	if config.map_submit then
-		set_normal_keymap(config.map_lhs, M.submit_current_buffer, "Submit current buffer to ACMOJ")
-	end
-
 	if config.map_problem_nav then
 		set_normal_keymap(config.map_problemsets_lhs, M.problemsets, "ACMOJ problemset selector")
 		set_normal_keymap(config.map_problem_next_lhs, M.problem_next, "ACMOJ next problem")
 		set_normal_keymap(config.map_problem_prev_lhs, M.problem_prev, "ACMOJ previous problem")
-		set_normal_keymap(config.map_problem_list_lhs, M.problem_list, "ACMOJ problemset list")
-	end
-
-	if config.map_run then
-		set_normal_keymap(config.map_run_lhs, M.run_current, "ACMOJ compile and run current file")
+		set_normal_keymap(config.map_problem_list_lhs, M.problem_list, "ACMOJ problem list")
 	end
 
 	if config.map_quick then
-		set_normal_keymap(config.map_quick_list_lhs, M.problem_list, "ACMOJ problem list")
 		set_normal_keymap(config.map_quick_test_lhs, M.test_samples, "ACMOJ test samples")
 		set_normal_keymap(config.map_quick_run_lhs, M.run_current, "ACMOJ run current code")
 		set_normal_keymap(config.map_quick_submit_lhs, M.submit_current_buffer, "ACMOJ submit current problem")

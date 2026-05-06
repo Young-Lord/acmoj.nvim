@@ -36,9 +36,12 @@ Examples:
 }
 ```
 
-Quick mappings are enabled by default in normal mode:
+Problem navigation (`map_problem_nav`) is enabled by default in normal mode:
 
-- `<leader>rl` open current problem list
+- `<leader>rl` open current problem list (loaded problemset)
+
+Quick mappings (`map_quick`) are enabled by default:
+
 - `<leader>rt` run sample tests
 - `<leader>rr` compile and run current code
 - `<leader>rs` submit current problem
@@ -52,17 +55,12 @@ require("acmoj").setup({
   language = "cpp",
   poll_interval_ms = 1200,
   timeout_ms = 120000,
-  map_submit = true,
-  map_lhs = "<leader>s",
   map_problem_nav = true,
   map_problemsets_lhs = "<leader>ss",
   map_problem_next_lhs = "<leader>sn",
   map_problem_prev_lhs = "<leader>sp",
-  map_problem_list_lhs = "<leader>sl",
-  map_run = false,
-  map_run_lhs = "<leader>r",
+  map_problem_list_lhs = "<leader>rl",
   map_quick = true,
-  map_quick_list_lhs = "<leader>rl",
   map_quick_test_lhs = "<leader>rt",
   map_quick_run_lhs = "<leader>rr",
   map_quick_submit_lhs = "<leader>rs",
@@ -84,6 +82,11 @@ Template file placeholders:
 - `{problem_title}`
 - `{problemset_id}`
 - `{problemset_name}`
+
+Problem navigation config:
+
+- Current problem list uses `map_problem_list_lhs` (default `<leader>rl`) or `:Acmoj list`.
+- Set `map_problem_nav = false` to disable the whole problem-navigation key group (including the list key).
 
 Quick mapping config:
 
@@ -133,8 +136,7 @@ Option 1 (plugin-managed mapping):
 
 ```lua
 require("acmoj").setup({
-  map_run = true,
-  map_run_lhs = "<leader>r",
+  map_quick_run_lhs = "<leader>r",
 })
 ```
 
