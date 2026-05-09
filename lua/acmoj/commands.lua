@@ -45,6 +45,9 @@ local subcommands = {
   desc = { run = function(actions)
     actions.toggle_problem_description()
   end, desc = "toggle problem description panel", min_args = 0, max_args = 0 },
+  web = { run = function(actions)
+    actions.open_problem_web()
+  end, desc = "open current problem in system browser", min_args = 0, max_args = 0 },
 }
 
 command_help_lines = function()

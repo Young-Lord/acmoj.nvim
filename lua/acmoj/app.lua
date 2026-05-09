@@ -8,6 +8,7 @@ local M = {}
 
 local config = {
 	base_url = "https://acm.sjtu.edu.cn/OnlineJudge/api/v1",
+	web_base_url = nil,
 	token_file = vim.fs.joinpath(vim.fn.stdpath("config"), "acmoj", "token.txt"),
 	language = "cpp",
 	poll_interval_ms = 1200,
@@ -351,6 +352,7 @@ local function extract_problem_section(problem, section)
 		description = { "description", "desc", "problem_description" },
 		input = { "input", "input_description", "input_format", "input_desc" },
 		output = { "output", "output_description", "output_format", "output_desc" },
+		data_range = { "data_range" },
 	}
 	return first_non_empty_string(problem, section_keys[section] or {})
 end
@@ -430,6 +432,20 @@ local function render_problem_statement_lines(problem, problem_detail)
 		table.insert(lines, "(empty)")
 	else
 		for _, line in ipairs(vim.split(output_desc, "\n", { plain = true, trimempty = false })) do
+			table.insert(lines, line)
+		end
+	end
+
+	table.insert(lines, "")
+	table.insert(lines, "数据范围:")
+	local range_desc = extract_problem_section(detail, "data_range")
+	if range_desc == "" then
+		range_desc = extract_problem_section(problem, "data_range")
+	end
+	if range_desc == "" then
+		table.insert(lines, "(empty)")
+	else
+		for _, line in ipairs(vim.split(range_desc, "\n", { plain = true, trimempty = false })) do
 			table.insert(lines, line)
 		end
 	end
@@ -1105,6 +1121,53 @@ function M.template()
 	end
 end
 
+local function problem_web_page_url(problem_id)
+	local base = config.web_base_url
+	if type(base) ~= "string" or base == "" then
+		base = config.base_url:match("^(.*)/api/v1/?$") or "https://acm.sjtu.edu.cn/OnlineJudge"
+	end
+	base = base:gsub("/$", "")
+	return string.format("%s/problem?problem_id=%d", base, problem_id)
+end
+
+local function open_system_uri(uri)
+	if vim.ui and type(vim.ui.open) == "function" then
+		local ok = pcall(vim.ui.open, uri)
+		if ok then
+			return nil
+		end
+	end
+	local cmd
+	if vim.fn.has("win32") == 1 then
+		cmd = { "cmd", "/c", "start", "", uri }
+	elseif vim.fn.has("macunix") == 1 then
+		cmd = { "open", uri }
+	else
+		cmd = { "xdg-open", uri }
+	end
+	local pid = vim.fn.jobstart(cmd, { detach = true })
+	if pid == 0 or pid == -1 then
+		return "failed to start system browser"
+	end
+	return nil
+end
+
+function M.open_problem_web()
+	local problem_id, id_err = files.get_problem_id_from_first_line()
+	if id_err then
+		notify(id_err, vim.log.levels.ERROR)
+		return
+	end
+
+	local url = problem_web_page_url(problem_id)
+	local open_err = open_system_uri(url)
+	if open_err then
+		notify(open_err, vim.log.levels.ERROR)
+		return
+	end
+	notify(string.format("opened problem %d in browser", problem_id))
+end
+
 function M.submit_current_buffer()
 	local token, token_err = files.read_token()
 	if token_err then
@@ -1415,6 +1478,7 @@ function M.setup(opts)
 			template = M.template,
 			clear_cache = M.clear_cache,
 			toggle_problem_description = M.toggle_problem_description,
+			open_problem_web = M.open_problem_web,
 		}, notify)
 		commands_created = true
 	end
