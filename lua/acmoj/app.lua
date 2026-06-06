@@ -70,11 +70,21 @@ local notify_mod = notify_module.create(config)
 local runner = runner_module.create(config)
 
 local ui = ui_module.create(config, state, cache, api, files, notify_mod, {
-	problemset = function(id) M.problemset(id) end,
-	problemsets = function() M.problemsets() end,
-	problem_next = function() M.problem_next() end,
-	problem_prev = function() M.problem_prev() end,
-	problem_jump = function(idx) M.problem_jump(idx) end,
+	problemset = function(id)
+		M.problemset(id)
+	end,
+	problemsets = function()
+		M.problemsets()
+	end,
+	problem_next = function()
+		M.problem_next()
+	end,
+	problem_prev = function()
+		M.problem_prev()
+	end,
+	problem_jump = function(idx)
+		M.problem_jump(idx)
+	end,
 })
 
 local function notify(msg, level, opts)
@@ -411,9 +421,10 @@ function M.submit_current_buffer()
 				return
 			end
 
-			submit_notice_id = notify(string.format("submitted: #%d, waiting for judge...", submission_id), vim.log.levels.INFO, {
-				timeout = 5000,
-			})
+			submit_notice_id =
+				notify(string.format("submitted: #%d, waiting for judge...", submission_id), vim.log.levels.INFO, {
+					timeout = 5000,
+				})
 			active_poll[submission_id] = true
 			poll_submission(submission_id, token, status_map, function()
 				notify_mod.dismiss_notification(submit_notice_id)
@@ -458,7 +469,12 @@ function M.test_samples(sample_index_arg)
 		return
 	end
 
-	notify_mod.notify_sticky("test", string.format("loading samples for problem %d ...", problem_id), vim.log.levels.INFO, { timeout = 2000 })
+	notify_mod.notify_sticky(
+		"test",
+		string.format("loading samples for problem %d ...", problem_id),
+		vim.log.levels.INFO,
+		{ timeout = 2000 }
+	)
 
 	local function run_sample_tests_async(samples)
 		if #samples == 0 then
@@ -469,7 +485,10 @@ function M.test_samples(sample_index_arg)
 		local test_targets = {}
 		if sample_index then
 			if sample_index > #samples then
-				notify(string.format("sample index out of range: %d (total: %d)", sample_index, #samples), vim.log.levels.ERROR)
+				notify(
+					string.format("sample index out of range: %d (total: %d)", sample_index, #samples),
+					vim.log.levels.ERROR
+				)
 				return
 			end
 			table.insert(test_targets, { idx = sample_index, sample = samples[sample_index] })
@@ -497,19 +516,32 @@ function M.test_samples(sample_index_arg)
 					pcall(vim.fn.delete, temp_dir, "rf")
 					local total = #test_targets
 					if mismatch == 0 then
-						notify_mod.notify_sticky("test", string.format("sample tests passed (%d/%d)", total, total), vim.log.levels.INFO, { timeout = 3500 })
+						notify_mod.notify_sticky(
+							"test",
+							string.format("sample tests passed (%d/%d)", total, total),
+							vim.log.levels.INFO,
+							{ timeout = 3500 }
+						)
 					else
 						if first_mismatch_detail then
 							local lines = {
 								first_mismatch_detail,
-								string.format("sample tests finished: %d passed, %d failed", total - mismatch, mismatch),
+								string.format(
+									"sample tests finished: %d passed, %d failed",
+									total - mismatch,
+									mismatch
+								),
 							}
 							if mismatch > 1 then
-								table.insert(lines, string.format("(only showing first mismatch, %d more failed)", mismatch - 1))
+								table.insert(lines, string.format("(%d more failed not showing)", mismatch - 1))
 							end
 							notify_mod.notify_sticky("test", table.concat(lines, "\n"), vim.log.levels.WARN)
 						else
-							notify_mod.notify_sticky("test", string.format("sample tests finished: %d passed, %d failed", total - mismatch, mismatch), vim.log.levels.WARN)
+							notify_mod.notify_sticky(
+								"test",
+								string.format("sample tests finished: %d passed, %d failed", total - mismatch, mismatch),
+								vim.log.levels.WARN
+							)
 						end
 					end
 					return
@@ -706,11 +738,21 @@ function M.setup(opts)
 	runner = runner_module.create(config)
 
 	ui = ui_module.create(config, state, cache, api, files, notify_mod, {
-		problemset = function(id) M.problemset(id) end,
-		problemsets = function() M.problemsets() end,
-		problem_next = function() M.problem_next() end,
-		problem_prev = function() M.problem_prev() end,
-		problem_jump = function(idx) M.problem_jump(idx) end,
+		problemset = function(id)
+			M.problemset(id)
+		end,
+		problemsets = function()
+			M.problemsets()
+		end,
+		problem_next = function()
+			M.problem_next()
+		end,
+		problem_prev = function()
+			M.problem_prev()
+		end,
+		problem_jump = function(idx)
+			M.problem_jump(idx)
+		end,
 	})
 
 	cache.load_cache()

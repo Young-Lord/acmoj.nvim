@@ -5,42 +5,47 @@ function M.create(config)
 		return vim.notify(config.notify_prefix .. msg, level or vim.log.levels.INFO, opts)
 	end
 
-	local function dismiss_notification(notification_id)
-		if notification_id == nil then
+	local function dismiss_notification_record(record)
+		if record == nil then
 			return
 		end
 
-		local ok, notify_module = pcall(require, "notify")
-		if not ok or type(notify_module) ~= "table" or type(notify_module.dismiss) ~= "function" then
+		if type(record) == "table" and record.win and vim.api.nvim_win_is_valid(record.win) then
+			pcall(vim.api.nvim_win_close, record.win, true)
+			local buf = record.buf
+			if buf and vim.api.nvim_buf_is_valid(buf) then
+				pcall(vim.api.nvim_buf_delete, buf, { force = true })
+			end
 			return
 		end
 
-		pcall(notify_module.dismiss, notification_id, { pending = true, silent = true })
+		if type(record) == "number" then
+			local ok, notify_module = pcall(require, "notify")
+			if ok and type(notify_module) == "table" and type(notify_module.dismiss) == "function" then
+				pcall(notify_module.dismiss, record, { pending = true, silent = true })
+			end
+		end
 	end
 
 	local sticky_notifications = {
-		test = {},
-		run = {},
+		test = nil,
+		run = nil,
 	}
 
 	local function clear_sticky_notifications(scope)
-		local notifications = sticky_notifications[scope]
-		if type(notifications) ~= "table" then
-			return
-		end
-
-		for _, notification_id in ipairs(notifications) do
-			dismiss_notification(notification_id)
-		end
-		sticky_notifications[scope] = {}
+		dismiss_notification_record(sticky_notifications[scope])
+		sticky_notifications[scope] = nil
 	end
 
 	local function notify_sticky(scope, msg, level, opts)
-		local merged_opts = vim.tbl_extend("force", { timeout = false }, opts or {})
-		local notification_id = notify(msg, level, merged_opts)
-		if type(sticky_notifications[scope]) == "table" then
-			table.insert(sticky_notifications[scope], notification_id)
-		end
+		local prev = sticky_notifications[scope]
+
+		clear_sticky_notifications(scope)
+
+		local merged_opts = vim.tbl_extend("force", { timeout = false, replace = prev }, opts or {})
+		local record = notify(msg, level, merged_opts)
+
+		sticky_notifications[scope] = record
 	end
 
 	local function ensure_highlights()
@@ -75,7 +80,7 @@ function M.create(config)
 
 	return {
 		notify = notify,
-		dismiss_notification = dismiss_notification,
+		dismiss_notification = dismiss_notification_record,
 		clear_sticky_notifications = clear_sticky_notifications,
 		notify_sticky = notify_sticky,
 		ensure_highlights = ensure_highlights,

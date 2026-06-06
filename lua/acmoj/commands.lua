@@ -55,7 +55,7 @@ command_help_lines = function()
   local names = vim.tbl_keys(subcommands)
   table.sort(names)
   for _, name in ipairs(names) do
-    table.insert(lines, string.format("  %-2s %s", name, subcommands[name].desc))
+    table.insert(lines, string.format("  %-5s %s", name .. ":", subcommands[name].desc))
   end
   return lines
 end
