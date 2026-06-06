@@ -161,14 +161,6 @@ function M.create(config)
 		vim.cmd("startinsert")
 	end
 
-	local function wrap_interactive_run_command(compile_cmd, run_cmd)
-		return string.format(
-			"( %s ) && ( %s ); __acmoj_status=$?; if [ $__acmoj_status -ne 0 ]; then echo; echo '[ACMOJ] compile/run failed (exit '$__acmoj_status')'; echo '[ACMOJ] shell kept open for inspection'; exec ${SHELL:-sh}; fi",
-			compile_cmd,
-			run_cmd
-		)
-	end
-
 	return {
 		build_command = build_command,
 		run_shell_command = run_shell_command,
@@ -179,7 +171,6 @@ function M.create(config)
 		run_binary_with_input = run_binary_with_input,
 		run_binary_with_input_async = run_binary_with_input_async,
 		open_interactive_command = open_interactive_command,
-		wrap_interactive_run_command = wrap_interactive_run_command,
 	}
 end
 

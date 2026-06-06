@@ -593,7 +593,17 @@ function M.run_current()
 		return
 	end
 
-	runner.open_interactive_command(runner.wrap_interactive_run_command(compile_cmd, run_cmd), cwd)
+	runner.run_shell_command_async(compile_cmd, { text = true }, function(result)
+		if result.code ~= 0 then
+			local err = util.trim((result.stderr or "") .. "\n" .. (result.stdout or ""))
+			if err == "" then
+				err = string.format("compile failed (exit %d)", result.code)
+			end
+			notify_mod.notify_sticky("run", err, vim.log.levels.ERROR)
+			return
+		end
+		runner.open_interactive_command(run_cmd, cwd)
+	end)
 end
 
 function M.problemset(id)
