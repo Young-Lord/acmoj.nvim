@@ -564,11 +564,17 @@ function M.test_samples(sample_index_arg)
 							first_mismatch_detail = table.concat({
 								string.format("测试点 #%d 结果不一致", i),
 								"输入:",
+								"```",
 								problem_mod.render_text_or_empty(sample.input),
+								"```",
 								"理论输出:",
+								"```",
 								problem_mod.render_text_or_empty(sample.expected),
+								"```",
 								"实际输出:",
+								"```",
 								problem_mod.render_text_or_empty(actual),
+								"```",
 							}, "\n")
 						end
 					end
