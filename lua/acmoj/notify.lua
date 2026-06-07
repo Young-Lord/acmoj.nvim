@@ -38,11 +38,9 @@ function M.create(config)
 	end
 
 	local function notify_sticky(scope, msg, level, opts)
-		local prev = sticky_notifications[scope]
-
 		clear_sticky_notifications(scope)
 
-		local merged_opts = vim.tbl_extend("force", { timeout = false, replace = prev }, opts or {})
+		local merged_opts = vim.tbl_extend("force", { timeout = false }, opts or {})
 		local record = notify(msg, level, merged_opts)
 
 		sticky_notifications[scope] = record
