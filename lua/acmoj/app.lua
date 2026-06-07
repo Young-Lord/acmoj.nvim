@@ -246,13 +246,13 @@ local function poll_submission(submission_id, token, status_map, on_finish)
 
 		api.get(token, "/submission/" .. submission_id, function(sub, err)
 			if err then
-				notify("query submission failed: " .. err, vim.log.levels.ERROR)
+				notify_mod.notify_sticky("submit", "query submission failed: " .. err, vim.log.levels.ERROR)
 				finish()
 				return
 			end
 
 			if type(sub) ~= "table" or type(sub.status) ~= "string" then
-				notify("invalid submission response", vim.log.levels.ERROR)
+				notify_mod.notify_sticky("submit", "invalid submission response", vim.log.levels.ERROR)
 				finish()
 				return
 			end
@@ -270,13 +270,22 @@ local function poll_submission(submission_id, token, status_map, on_finish)
 				local msg = string.format("#%d %s%s", submission_id, status_text, problem_mod.format_resource(sub))
 				local level = accepted and vim.log.levels.INFO or vim.log.levels.WARN
 				local status_hl = accepted and "AcmojStatusAC" or "AcmojStatusBad"
-				notify_mod.notify_with_inline_highlight(msg, level, status_text, status_hl)
+				notify_mod.notify_sticky(
+					"submit",
+					msg,
+					level,
+					notify_mod.inline_highlight_opts(status_text, status_hl)
+				)
 				finish()
 				return
 			end
 
 			if vim.uv.now() - start_at >= config.timeout_ms then
-				notify(string.format("#%d still running, stop polling (timeout)", submission_id), vim.log.levels.WARN)
+				notify_mod.notify_sticky(
+					"submit",
+					string.format("#%d still running, stop polling (timeout)", submission_id),
+					vim.log.levels.WARN
+				)
 				finish()
 				return
 			end
@@ -389,6 +398,8 @@ function M.open_problem_web()
 end
 
 function M.submit_current_buffer()
+	notify_mod.clear_all_sticky_notifications()
+
 	local token, token_err = files.read_token()
 	if token_err then
 		notify(token_err, vim.log.levels.ERROR)
@@ -407,8 +418,6 @@ function M.submit_current_buffer()
 		return
 	end
 
-	local submit_notice_id = nil
-
 	api.get(token, "/meta/info/judge-status", function(status_map, status_err)
 		if status_err then
 			notify("fetch status map failed: " .. status_err, vim.log.levels.WARN)
@@ -417,25 +426,24 @@ function M.submit_current_buffer()
 
 		api.submit(problem_id, config.language, code, token, function(submission_id, submit_err)
 			if submit_err then
-				notify(submit_err, vim.log.levels.ERROR)
+				notify_mod.notify_sticky("submit", submit_err, vim.log.levels.ERROR)
 				return
 			end
 
-			submit_notice_id =
-				notify(string.format("submitted: #%d, waiting for judge...", submission_id), vim.log.levels.INFO, {
-					timeout = 5000,
-				})
+			notify_mod.notify_sticky(
+				"submit",
+				string.format("submitted: #%d, waiting for judge...", submission_id),
+				vim.log.levels.INFO
+			)
 			active_poll[submission_id] = true
-			poll_submission(submission_id, token, status_map, function()
-				notify_mod.dismiss_notification(submit_notice_id)
-			end)
+			poll_submission(submission_id, token, status_map)
 		end)
 	end)
 end
 
 function M.test_samples(sample_index_arg)
 	vim.cmd("silent! w")
-	notify_mod.clear_sticky_notifications("test")
+	notify_mod.clear_all_sticky_notifications()
 
 	local sample_index = nil
 	if sample_index_arg and sample_index_arg ~= "" then
@@ -610,7 +618,7 @@ end
 
 function M.run_current()
 	vim.cmd("silent! w")
-	notify_mod.clear_sticky_notifications("run")
+	notify_mod.clear_all_sticky_notifications()
 
 	local src = vim.fn.expand("%:p")
 	if src == "" then

@@ -19,22 +19,28 @@ function M.create(config)
 			return
 		end
 
-		if type(record) == "number" then
-			local ok, notify_module = pcall(require, "notify")
-			if ok and type(notify_module) == "table" and type(notify_module.dismiss) == "function" then
-				pcall(notify_module.dismiss, record, { pending = true, silent = true })
-			end
-		end
+		pcall(vim.notify, "", vim.log.levels.INFO, {
+			replace = record,
+			hide_from_history = true,
+			timeout = 1,
+		})
 	end
 
 	local sticky_notifications = {
 		test = nil,
 		run = nil,
+		submit = nil,
 	}
 
 	local function clear_sticky_notifications(scope)
 		dismiss_notification_record(sticky_notifications[scope])
 		sticky_notifications[scope] = nil
+	end
+
+	local function clear_all_sticky_notifications()
+		for scope, _ in pairs(sticky_notifications) do
+			clear_sticky_notifications(scope)
+		end
 	end
 
 	local function notify_sticky(scope, msg, level, opts)
@@ -53,13 +59,13 @@ function M.create(config)
 		vim.api.nvim_set_hl(0, "AcmojStatusBad", { link = "DiagnosticError", default = true })
 	end
 
-	local function notify_with_inline_highlight(msg, level, needle, hl_group)
+	local function inline_highlight_opts(needle, hl_group)
 		if type(needle) ~= "string" or needle == "" or type(hl_group) ~= "string" or hl_group == "" then
-			return notify(msg, level)
+			return {}
 		end
 
 		ensure_highlights()
-		return notify(msg, level, {
+		return {
 			on_open = function(win)
 				local buf = vim.api.nvim_win_get_buf(win)
 				local lines = vim.api.nvim_buf_get_lines(buf, 0, 1, false)
@@ -73,15 +79,25 @@ function M.create(config)
 				end
 				vim.api.nvim_buf_add_highlight(buf, -1, hl_group, 0, s - 1, e)
 			end,
-		})
+		}
+	end
+
+	local function notify_with_inline_highlight(msg, level, needle, hl_group)
+		local opts = inline_highlight_opts(needle, hl_group)
+		if next(opts) == nil then
+			return notify(msg, level)
+		end
+		return notify(msg, level, opts)
 	end
 
 	return {
 		notify = notify,
 		dismiss_notification = dismiss_notification_record,
 		clear_sticky_notifications = clear_sticky_notifications,
+		clear_all_sticky_notifications = clear_all_sticky_notifications,
 		notify_sticky = notify_sticky,
 		ensure_highlights = ensure_highlights,
+		inline_highlight_opts = inline_highlight_opts,
 		notify_with_inline_highlight = notify_with_inline_highlight,
 	}
 end
