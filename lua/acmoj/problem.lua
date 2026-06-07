@@ -198,6 +198,39 @@ function M.is_accepted_status(status)
 	return status:lower() == "accepted"
 end
 
+function M.extract_time_limit_ms(problem)
+	if type(problem) ~= "table" then
+		return nil
+	end
+	local plan = problem.plan_summary
+	if type(plan) ~= "table" then
+		return nil
+	end
+	local subtasks = plan.subtasks
+	if type(subtasks) ~= "table" then
+		return nil
+	end
+	local max_ms = 0
+	for _, subtask in ipairs(subtasks) do
+		local tps = subtask.testpoints
+		if type(tps) == "table" then
+			for _, tp in ipairs(tps) do
+				local limits = tp and tp.limits
+				if type(limits) == "table" then
+					local ms = limits.time_msecs
+					if type(ms) == "number" and ms > max_ms then
+						max_ms = ms
+					end
+				end
+			end
+		end
+	end
+	if max_ms <= 0 then
+		return nil
+	end
+	return max_ms
+end
+
 function M.format_resource(sub)
 	local parts = {}
 	if sub.time_msecs ~= vim.NIL and sub.time_msecs ~= nil then

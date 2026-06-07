@@ -121,17 +121,26 @@ function M.create(config)
 		return result.stdout or "", nil
 	end
 
-	local function run_binary_with_input_async(binary, input, on_done)
+	local function run_binary_with_input_async(binary, input, on_done, timeout_ms)
 		local run_cmd, cmd_err = build_command(config.run_cmd, { bin = binary })
 		if cmd_err then
 			on_done("", "invalid run_cmd: " .. cmd_err)
 			return
 		end
 
-		run_shell_command_async(run_cmd, {
+		local opts = {
 			stdin = tostring(input or ""),
 			text = true,
-		}, function(result)
+		}
+		if type(timeout_ms) == "number" and timeout_ms > 0 then
+			opts.timeout = timeout_ms
+		end
+
+		run_shell_command_async(run_cmd, opts, function(result)
+			if type(timeout_ms) == "number" and timeout_ms > 0 and (result.signal == 15 or result.signal == 9) then
+				on_done(result.stdout or "", string.format("超时 (>%dms)", timeout_ms))
+				return
+			end
 			if result.code ~= 0 then
 				local util = require("acmoj.util")
 				local err = util.trim(result.stderr or "")

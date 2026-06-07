@@ -51,6 +51,7 @@ local state = {
 	problem_desc_cache = {},
 	problem_desc_visible = true,
 	samples_cache = {},
+	time_limit_cache = {},
 	cache = {
 		accepted_problems = {},
 		token_to_username = {},
@@ -484,10 +485,15 @@ function M.test_samples(sample_index_arg)
 		{ timeout = 2000 }
 	)
 
-	local function run_sample_tests_async(samples)
+	local function run_sample_tests_async(samples, time_limit_ms)
 		if #samples == 0 then
 			notify("no available samples for this problem", vim.log.levels.WARN)
 			return
+		end
+
+		local kill_timeout_ms = nil
+		if type(time_limit_ms) == "number" and time_limit_ms > 0 then
+			kill_timeout_ms = 2 * time_limit_ms
 		end
 
 		local test_targets = {}
@@ -589,7 +595,7 @@ function M.test_samples(sample_index_arg)
 
 					current = current + 1
 					run_next()
-				end)
+				end, kill_timeout_ms)
 			end
 
 			run_next()
@@ -597,8 +603,9 @@ function M.test_samples(sample_index_arg)
 	end
 
 	local cached_samples = state.samples_cache[problem_id]
+	local cached_time_limit = state.time_limit_cache[problem_id]
 	if cached_samples and #cached_samples > 0 then
-		run_sample_tests_async(cached_samples)
+		run_sample_tests_async(cached_samples, cached_time_limit)
 		return
 	end
 
@@ -612,7 +619,11 @@ function M.test_samples(sample_index_arg)
 		if #samples > 0 then
 			state.samples_cache[problem_id] = samples
 		end
-		run_sample_tests_async(samples)
+		local time_limit_ms = problem_mod.extract_time_limit_ms(problem)
+		if time_limit_ms then
+			state.time_limit_cache[problem_id] = time_limit_ms
+		end
+		run_sample_tests_async(samples, time_limit_ms)
 	end)
 end
 
@@ -639,16 +650,52 @@ function M.run_current()
 		return
 	end
 
-	runner.run_shell_command_async(compile_cmd, { text = true }, function(result)
-		if result.code ~= 0 then
-			local err = util.trim((result.stderr or "") .. "\n" .. (result.stdout or ""))
-			if err == "" then
-				err = string.format("compile failed (exit %d)", result.code)
-			end
-			notify_mod.notify_sticky("run", err, vim.log.levels.ERROR)
-			return
+	local function do_compile_and_run(time_limit_ms)
+		local effective_run_cmd = run_cmd
+		if type(time_limit_ms) == "number" and time_limit_ms > 0 then
+			local kill_seconds = (2 * time_limit_ms) / 1000
+			effective_run_cmd = string.format("timeout --foreground %.3f %s", kill_seconds, run_cmd)
 		end
-		runner.open_interactive_command(run_cmd, cwd)
+		runner.run_shell_command_async(compile_cmd, { text = true }, function(result)
+			if result.code ~= 0 then
+				local err = util.trim((result.stderr or "") .. "\n" .. (result.stdout or ""))
+				if err == "" then
+					err = string.format("compile failed (exit %d)", result.code)
+				end
+				notify_mod.notify_sticky("run", err, vim.log.levels.ERROR)
+				return
+			end
+			runner.open_interactive_command(effective_run_cmd, cwd)
+		end)
+	end
+
+	local problem_id = files.get_problem_id_from_first_line()
+	if not problem_id then
+		do_compile_and_run(nil)
+		return
+	end
+
+	local cached_time_limit = state.time_limit_cache[problem_id]
+	if cached_time_limit then
+		do_compile_and_run(cached_time_limit)
+		return
+	end
+
+	local token, token_err = files.read_token()
+	if token_err then
+		do_compile_and_run(nil)
+		return
+	end
+
+	api.get(token, "/problem/" .. problem_id, function(problem, err)
+		local time_limit_ms = nil
+		if not err and type(problem) == "table" then
+			time_limit_ms = problem_mod.extract_time_limit_ms(problem)
+			if time_limit_ms then
+				state.time_limit_cache[problem_id] = time_limit_ms
+			end
+		end
+		do_compile_and_run(time_limit_ms)
 	end)
 end
 
